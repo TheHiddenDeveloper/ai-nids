@@ -1,0 +1,49 @@
+network:
+  interface: "eth0"           # change to your NIC (ip a to check)
+  capture_timeout: 10         # seconds per capture window
+  max_packets: 1000           # packets per batch
+
+features:
+  flow_timeout: 60            # seconds before a flow expires
+  selected_features:          # subset of CICIDS2017 features
+    - duration
+    - protocol_type
+    - src_bytes
+    - dst_bytes
+    - packet_count
+    - avg_packet_len
+    - std_packet_len
+    - flow_bytes_per_sec
+    - flow_packets_per_sec
+    - fwd_packet_len_max
+    - bwd_packet_len_max
+    - fin_flag_count
+    - syn_flag_count
+    - rst_flag_count
+    - psh_flag_count
+    - ack_flag_count
+
+model:
+  type: "random_forest"       # random_forest | autoencoder | ensemble
+  rf_n_estimators: 200
+  rf_max_depth: 20
+  anomaly_threshold: 0.65     # score above this = alert
+  model_path: "data/models/nids_model.joblib"
+  scaler_path: "data/models/scaler.joblib"
+  label_encoder_path: "data/models/label_encoder.joblib"
+
+alerts:
+  severity_levels:
+    low: 0.65
+    medium: 0.80
+    high: 0.92
+  log_path: "data/alerts.jsonl"
+
+dashboard:
+  host: "0.0.0.0"
+  port: 8501
+  refresh_interval: 3         # seconds
+
+logging:
+  level: "INFO"
+  log_file: "data/nids.log"
