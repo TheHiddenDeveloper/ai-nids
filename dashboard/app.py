@@ -300,6 +300,33 @@ with col_perc:
     else:
         st.info("Waiting for scored flows.")
 
+# ── Row 5: Signature rule hits ───────────────────────────────────────────────
+
+st.divider()
+st.subheader("Signature rule hits")
+
+if has_alerts and "signature_match" in alerts_df.columns:
+    sig_hits = (
+        alerts_df["signature_match"]
+        .dropna()
+        .str.split(":", n=1).str[0]   # rule name before the colon
+        .value_counts()
+        .head(12)
+        .reset_index()
+        .rename(columns={"signature_match": "Rule", "count": "Hits"})
+    )
+    if not sig_hits.empty:
+        fig7 = px.bar(
+            sig_hits, x="Hits", y="Rule", orientation="h",
+            color_discrete_sequence=["#f97316"],
+        )
+        fig7.update_layout(**DARK_LAYOUT, yaxis={"autorange": "reversed"})
+        st.plotly_chart(fig7, use_container_width=True)
+    else:
+        st.info("No signature matches recorded yet.")
+else:
+    st.info("Signature match data will appear here once the monitor is running.")
+
 # ── Footer ────────────────────────────────────────────────────────────────────
 
 st.caption(

@@ -1,0 +1,345 @@
+# AI-NIDS Signature Database
+# ----------------------------
+# Each rule has:
+#   id          : unique string identifier
+#   name        : short human-readable name
+#   description : what the rule detects
+#   severity    : low | medium | high
+#   enabled     : true | false  (toggle without deleting)
+#   tags        : list of categories (dos, scan, c2, exfil, bruteforce, web, suspicious)
+#   conditions  : list of field comparisons (ALL must match — logical AND)
+#     field     : feature name (matches keys in flow feature dict)
+#     op        : gt | lt | gte | lte | eq | neq | in | not_in | contains
+#     value     : comparison value (number, string, or list for in/not_in)
+#
+# Hot-reload: send SIGHUP to the monitor process, or the watcher thread
+# will pick up changes within 10 seconds automatically.
+
+version: "1.0"
+last_updated: "2025-01-01"
+
+rules:
+
+  # ── Flood / DDoS ────────────────────────────────────────────────────────────
+
+  - id: SYN_FLOOD_001
+    name: SYN flood
+    description: >
+      High SYN count with almost no ACKs — classic TCP SYN flood.
+      Attacker exhausts server connection table without completing handshakes.
+    severity: high
+    enabled: true
+    tags: [dos, flood]
+    conditions:
+      - field: syn_flag_count
+        op: gt
+        value: 50
+      - field: ack_flag_count
+        op: lt
+        value: 5
+
+  - id: HIGH_VOLUME_001
+    name: High-volume flow
+    description: >
+      Exceptionally high bytes-per-second rate. Could indicate DDoS amplification,
+      large-scale data exfiltration, or a misconfigured service flooding the network.
+    severity: high
+    enabled: true
+    tags: [dos, exfil]
+    conditions:
+      - field: flow_bytes_per_sec
+        op: gt
+        value: 10000000     # 10 MB/s
+
+  - id: UDP_FLOOD_001
+    name: UDP flood
+    description: >
+      High packet rate over UDP with very small average packet size —
+      characteristic of UDP amplification floods (DNS, NTP, memcached).
+    severity: high
+    enabled: true
+    tags: [dos, flood]
+    conditions:
+      - field: protocol_type
+        op: eq
+        value: 17           # UDP
+      - field: flow_packets_per_sec
+        op: gt
+        value: 500
+      - field: avg_packet_len
+        op: lt
+        value: 100
+
+  # ── Scanning ────────────────────────────────────────────────────────────────
+
+  - id: PORT_SCAN_001
+    name: Port scan (RST-based)
+    description: >
+      Large number of RST packets from one source. Each RST typically means
+      a closed port was probed — strong indicator of a horizontal port scan.
+    severity: medium
+    enabled: true
+    tags: [scan]
+    conditions:
+      - field: rst_flag_count
+        op: gt
+        value: 20
+
+  - id: FIN_SCAN_001
+    name: FIN scan (stealth)
+    description: >
+      FIN packets sent without a prior established connection (no SYN, no ACK).
+      Used to bypass stateless firewalls and enumerate open ports quietly.
+    severity: medium
+    enabled: true
+    tags: [scan]
+    conditions:
+      - field: fin_flag_count
+        op: gt
+        value: 5
+      - field: syn_flag_count
+        op: eq
+        value: 0
+      - field: ack_flag_count
+        op: eq
+        value: 0
+
+  - id: NULL_SCAN_001
+    name: NULL scan
+    description: >
+      Flow with zero TCP flags set. No legitimate traffic uses null flags —
+      used by scanners to identify OS type and open ports.
+    severity: medium
+    enabled: true
+    tags: [scan]
+    conditions:
+      - field: syn_flag_count
+        op: eq
+        value: 0
+      - field: ack_flag_count
+        op: eq
+        value: 0
+      - field: fin_flag_count
+        op: eq
+        value: 0
+      - field: rst_flag_count
+        op: eq
+        value: 0
+      - field: psh_flag_count
+        op: eq
+        value: 0
+      - field: packet_count
+        op: gt
+        value: 5
+
+  # ── C2 / Beaconing ──────────────────────────────────────────────────────────
+
+  - id: C2_BEACON_001
+    name: C2 beacon (tiny periodic flow)
+    description: >
+      Very few packets, very short duration. Pattern matches known C2
+      check-in behaviour where malware sends a heartbeat every N seconds.
+    severity: high
+    enabled: true
+    tags: [c2]
+    conditions:
+      - field: packet_count
+        op: lte
+        value: 3
+      - field: duration
+        op: lt
+        value: 0.5
+
+  - id: C2_BEACON_002
+    name: C2 beacon (low-and-slow)
+    description: >
+      Very long-lived flow with suspiciously low data transfer.
+      Indicates a persistent connection kept alive with minimal traffic — common
+      in RAT (Remote Access Trojan) C2 channels.
+    severity: medium
+    enabled: true
+    tags: [c2]
+    conditions:
+      - field: duration
+        op: gt
+        value: 300          # 5+ minutes
+      - field: src_bytes
+        op: lt
+        value: 1000         # but almost no data
+
+  # ── Suspicious Ports ────────────────────────────────────────────────────────
+
+  - id: BAD_PORT_TELNET
+    name: Telnet traffic
+    description: >
+      Traffic to port 23 (Telnet). Telnet transmits credentials in plaintext
+      and should not appear on any modern network.
+    severity: medium
+    enabled: true
+    tags: [suspicious]
+    conditions:
+      - field: _dst_port
+        op: eq
+        value: 23
+
+  - id: BAD_PORT_SMB
+    name: SMB traffic (port 445)
+    description: >
+      Traffic to port 445 (SMB). Historically targeted by EternalBlue, WannaCry,
+      and NotPetya. Inbound 445 should never be allowed from untrusted networks.
+    severity: high
+    enabled: true
+    tags: [suspicious]
+    conditions:
+      - field: _dst_port
+        op: eq
+        value: 445
+
+  - id: BAD_PORT_RDP
+    name: RDP traffic (port 3389)
+    description: >
+      Traffic to port 3389 (RDP). Frequent target for brute-force and
+      credential-stuffing attacks. Exposed RDP is a top ransomware entry vector.
+    severity: medium
+    enabled: true
+    tags: [suspicious, bruteforce]
+    conditions:
+      - field: _dst_port
+        op: eq
+        value: 3389
+
+  - id: BAD_PORT_VNC
+    name: VNC traffic (port 5900)
+    description: Remote desktop via VNC — often misconfigured with weak credentials.
+    severity: low
+    enabled: true
+    tags: [suspicious]
+    conditions:
+      - field: _dst_port
+        op: eq
+        value: 5900
+
+  - id: BAD_PORT_IRC
+    name: IRC traffic (port 6667)
+    description: >
+      IRC on port 6667 is a classic C2 channel used by botnets.
+      Very few legitimate services use IRC on default ports today.
+    severity: high
+    enabled: true
+    tags: [c2, suspicious]
+    conditions:
+      - field: _dst_port
+        op: eq
+        value: 6667
+
+  - id: BAD_PORT_METERPRETER
+    name: Metasploit listener (port 4444)
+    description: Default Metasploit meterpreter reverse-shell listener port.
+    severity: high
+    enabled: true
+    tags: [c2, suspicious]
+    conditions:
+      - field: _dst_port
+        op: eq
+        value: 4444
+
+  - id: BAD_PORT_BACKCONNECT
+    name: Back Orifice / NetBus
+    description: Known backdoor ports (31337, 12345) used by legacy RATs.
+    severity: high
+    enabled: true
+    tags: [c2, suspicious]
+    conditions:
+      - field: _dst_port
+        op: in
+        value: [31337, 12345]
+
+  # ── Brute Force ─────────────────────────────────────────────────────────────
+
+  - id: BRUTEFORCE_SSH_001
+    name: SSH brute-force
+    description: >
+      High packet count to port 22 in a short flow. Each connection attempt
+      is a separate TCP handshake — rapid repeated connections indicate
+      a credential-stuffing or dictionary attack against SSH.
+    severity: high
+    enabled: true
+    tags: [bruteforce]
+    conditions:
+      - field: _dst_port
+        op: eq
+        value: 22
+      - field: syn_flag_count
+        op: gt
+        value: 20
+      - field: duration
+        op: lt
+        value: 30
+
+  - id: BRUTEFORCE_FTP_001
+    name: FTP brute-force
+    description: Repeated connection attempts against FTP (port 21).
+    severity: medium
+    enabled: true
+    tags: [bruteforce]
+    conditions:
+      - field: _dst_port
+        op: eq
+        value: 21
+      - field: syn_flag_count
+        op: gt
+        value: 15
+
+  # ── Exfiltration ─────────────────────────────────────────────────────────────
+
+  - id: EXFIL_LARGE_UPLOAD_001
+    name: Large outbound upload
+    description: >
+      Flow with very high src_bytes but low dst_bytes — asymmetric upload pattern
+      consistent with data exfiltration over a plain TCP channel.
+    severity: medium
+    enabled: true
+    tags: [exfil]
+    conditions:
+      - field: src_bytes
+        op: gt
+        value: 5000000      # 5 MB sent
+      - field: flow_bytes_per_sec
+        op: gt
+        value: 500000       # sustained rate
+
+  # ── Disabled / Example rules ─────────────────────────────────────────────────
+  # These are off by default — enable by setting enabled: true
+
+  - id: ICMP_FLOOD_001
+    name: ICMP flood
+    description: High-rate ICMP traffic — possible ping flood.
+    severity: medium
+    enabled: false
+    tags: [dos, flood]
+    conditions:
+      - field: protocol_type
+        op: eq
+        value: 1            # ICMP
+      - field: flow_packets_per_sec
+        op: gt
+        value: 100
+
+  - id: DNS_EXFIL_001
+    name: DNS exfiltration (high packet rate)
+    description: >
+      Very high UDP packet rate to port 53. DNS tunnelling tools send
+      many small UDP packets to encode data in DNS query names.
+    severity: medium
+    enabled: false
+    tags: [exfil, c2]
+    conditions:
+      - field: _dst_port
+        op: eq
+        value: 53
+      - field: flow_packets_per_sec
+        op: gt
+        value: 50
+      - field: protocol_type
+        op: eq
+        value: 17

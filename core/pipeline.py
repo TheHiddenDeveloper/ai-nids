@@ -57,7 +57,7 @@ class NIDSPipeline:
         self.aggregator  = FlowAggregator(flow_timeout=flow_timeout)
         self.extractor   = FeatureExtractor()
         self.deduplicator = AlertDeduplicator(suppress_window_secs=dedup_window)
-        self.sig_checker = SignatureChecker() if use_signatures else None
+        self.sig_checker = SignatureChecker(watch=True) if use_signatures else None
 
         # AI inference
         self.engine = None
