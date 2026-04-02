@@ -1,27 +1,27 @@
 # Packet capture
-scapy==2.5.0
-pyshark==0.6
+scapy
+pyshark
 
 # Data processing
-pandas==2.2.2
-numpy==1.26.4
+pandas
+numpy
 
 # Machine learning
-scikit-learn==1.4.2
-tensorflow==2.16.1
-keras==3.3.3
-joblib==1.4.2
-imbalanced-learn==0.12.3
+scikit-learn
+tensorflow
+keras
+joblib
+imbalanced-learn
 
 # Visualization & dashboard
-streamlit==1.35.0
-plotly==5.22.0
-matplotlib==3.9.0
-seaborn==0.13.2
+streamlit
+plotly
+matplotlib
+seaborn
 
 # Utilities
-pyyaml==6.0.1
-loguru==0.7.2
-python-dotenv==1.0.1
-tqdm==4.66.4
-colorama==0.4.6
+pyyaml
+loguru
+python-dotenv
+tqdm
+colorama
