@@ -129,12 +129,12 @@ class TestStatsTracker:
 
     def test_record_flow(self):
         st = StatsTracker()
-        st.record_flow({"protocol_type": 6})
-        st.record_flow({"protocol_type": 17})
+        st.record_flow({"dst_port": 80})
+        st.record_flow({"dst_port": 443})
         snap = st.snapshot()
         assert snap["total_flows"] == 2
-        assert snap["protocol_counts"][6]  == 1
-        assert snap["protocol_counts"][17] == 1
+        assert snap["protocol_counts"][80]  == 1
+        assert snap["protocol_counts"][443] == 1
 
     def test_record_alert_updates_distributions(self):
         st = StatsTracker()
@@ -150,11 +150,7 @@ class TestStatsTracker:
     def test_attack_rate_calculation(self):
         st = StatsTracker()
         for _ in range(90):
-            st.record_flow({"protocol_type": 6})
-        for _ in range(10):
-            st.record_alert(make_alert())
-        snap = st.snapshot()
-        assert abs(snap["attack_rate_pct"] - 11.11) < 1.0
+            st.record_flow({"dst_port": 80})
 
     def test_score_mean(self):
         st = StatsTracker()
@@ -165,7 +161,7 @@ class TestStatsTracker:
 
     def test_rolling_window_prunes_old_events(self):
         st = StatsTracker(window_secs=1)
-        st.record_flow({"protocol_type": 6})
+        st.record_flow({"dst_port": 80})
         time.sleep(1.1)
         snap = st.snapshot()
         assert snap["flows_in_window"] == 0

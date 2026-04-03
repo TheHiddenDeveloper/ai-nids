@@ -16,9 +16,11 @@ from sklearn.preprocessing import LabelEncoder
 from loguru import logger
 
 # Mapping: CICIDS2017 column name → our internal feature name
+# Note: MachineLearningCSV.zip does not include a 'Protocol' column —
+# 'Destination Port' is used instead as the protocol proxy.
 CICIDS_COLUMN_MAP = {
+    "Destination Port": "dst_port",
     "Flow Duration": "duration",
-    "Protocol": "protocol_type",
     "Total Length of Fwd Packets": "src_bytes",
     "Total Length of Bwd Packets": "dst_bytes",
     "Total Fwd Packets": "packet_count",
@@ -37,7 +39,7 @@ CICIDS_COLUMN_MAP = {
 }
 
 FEATURE_COLS = [
-    "duration", "protocol_type", "src_bytes", "dst_bytes",
+    "dst_port", "duration", "src_bytes", "dst_bytes",
     "packet_count", "avg_packet_len", "std_packet_len",
     "flow_bytes_per_sec", "flow_packets_per_sec",
     "fwd_packet_len_max", "bwd_packet_len_max",

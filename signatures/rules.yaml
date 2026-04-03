@@ -54,15 +54,12 @@ rules:
   - id: UDP_FLOOD_001
     name: UDP flood
     description: >
-      High packet rate over UDP with very small average packet size —
+      High packet rate with very small average packet size —
       characteristic of UDP amplification floods (DNS, NTP, memcached).
     severity: high
     enabled: true
     tags: [dos, flood]
     conditions:
-      - field: protocol_type
-        op: eq
-        value: 17           # UDP
       - field: flow_packets_per_sec
         op: gt
         value: 500
@@ -313,33 +310,30 @@ rules:
 
   - id: ICMP_FLOOD_001
     name: ICMP flood
-    description: High-rate ICMP traffic — possible ping flood.
+    description: High-rate small-packet traffic — possible ping flood.
     severity: medium
     enabled: false
     tags: [dos, flood]
     conditions:
-      - field: protocol_type
-        op: eq
-        value: 1            # ICMP
       - field: flow_packets_per_sec
         op: gt
         value: 100
+      - field: avg_packet_len
+        op: lt
+        value: 80
 
   - id: DNS_EXFIL_001
     name: DNS exfiltration (high packet rate)
     description: >
-      Very high UDP packet rate to port 53. DNS tunnelling tools send
+      Very high packet rate to port 53. DNS tunnelling tools send
       many small UDP packets to encode data in DNS query names.
     severity: medium
     enabled: false
     tags: [exfil, c2]
     conditions:
-      - field: _dst_port
+      - field: dst_port
         op: eq
         value: 53
       - field: flow_packets_per_sec
         op: gt
         value: 50
-      - field: protocol_type
-        op: eq
-        value: 17

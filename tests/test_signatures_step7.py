@@ -34,9 +34,9 @@ class TestCondition:
         assert c.evaluate({"duration": 1.0}) is False
 
     def test_eq_numeric(self):
-        c = Condition(field="protocol_type", op="eq", value=17)
-        assert c.evaluate({"protocol_type": 17}) is True
-        assert c.evaluate({"protocol_type": 6})  is False
+        c = Condition(field="dst_port", op="eq", value=443)
+        assert c.evaluate({"dst_port": 443}) is True
+        assert c.evaluate({"dst_port": 80})  is False
 
     def test_eq_string(self):
         c = Condition(field="label", op="eq", value="ATTACK")
@@ -320,6 +320,6 @@ class TestRealRulesYaml:
             "flow_bytes_per_sec": 1600,
             "flow_packets_per_sec": 8,
             "avg_packet_len": 200,
-            "protocol_type": 6, "_dst_port": 443,
+            "dst_port": 443, "_dst_port": 443,
         }
         assert checker.check(flow) is None

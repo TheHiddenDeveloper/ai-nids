@@ -10,9 +10,9 @@ import numpy as np
 from typing import List, Optional
 from loguru import logger
 
-# Must match config.yaml features.selected_features
+# Must match ai_engine/dataset.py FEATURE_COLS exactly
 FEATURE_COLS = [
-    "duration", "protocol_type", "src_bytes", "dst_bytes",
+    "dst_port", "duration", "src_bytes", "dst_bytes",
     "packet_count", "avg_packet_len", "std_packet_len",
     "flow_bytes_per_sec", "flow_packets_per_sec",
     "fwd_packet_len_max", "bwd_packet_len_max",

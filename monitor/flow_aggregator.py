@@ -38,8 +38,8 @@ class Flow:
 
         first = self.packets[0]
         return {
+            "dst_port": first.get("dst_port", 0),
             "duration": round(duration, 6),
-            "protocol_type": first.get("protocol", 0),
             "src_bytes": sum(pkt_lens),
             "dst_bytes": sum(pkt_lens),
             "packet_count": len(self.packets),

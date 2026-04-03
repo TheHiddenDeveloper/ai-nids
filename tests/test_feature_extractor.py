@@ -14,7 +14,7 @@ from monitor.feature_extractor import FeatureExtractor, FEATURE_COLS
 
 
 def make_flow(
-    duration=1.5, protocol_type=6, packet_count=10,
+    dst_port=80, duration=1.5, packet_count=10,
     src_bytes=1500, dst_bytes=800,
     avg_packet_len=150.0, std_packet_len=20.0,
     flow_bytes_per_sec=1000.0, flow_packets_per_sec=6.6,
@@ -22,11 +22,11 @@ def make_flow(
     fin_flag_count=1, syn_flag_count=1,
     rst_flag_count=0, psh_flag_count=2, ack_flag_count=8,
     src_ip="1.2.3.4", dst_ip="5.6.7.8",
-    src_port=54321, dst_port=80,
+    src_port=54321,
 ):
     return {
+        "dst_port": dst_port,
         "duration": duration,
-        "protocol_type": protocol_type,
         "packet_count": packet_count,
         "src_bytes": src_bytes,
         "dst_bytes": dst_bytes,

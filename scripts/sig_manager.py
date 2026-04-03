@@ -153,25 +153,23 @@ def cmd_test(args):
 
     # Build a flow that satisfies all numeric conditions
     test_flow = {
-        "syn_flag_count":    100,
-        "ack_flag_count":    0,
-        "fin_flag_count":    0,
-        "rst_flag_count":    50,
-        "psh_flag_count":    0,
-        "urg_flag_count":    0,
-        "packet_count":      2,
-        "duration":          0.1,
-        "src_bytes":         9_000_000,
-        "dst_bytes":         100,
+        "dst_port":           80,
+        "syn_flag_count":     100,
+        "ack_flag_count":     0,
+        "fin_flag_count":     0,
+        "rst_flag_count":     50,
+        "psh_flag_count":     0,
+        "urg_flag_count":     0,
+        "packet_count":       2,
+        "duration":           0.1,
+        "src_bytes":          9_000_000,
+        "dst_bytes":          100,
         "flow_bytes_per_sec": 15_000_000,
         "flow_packets_per_sec": 600,
-        "avg_packet_len":    50,
-        "protocol_type":     rule.conditions[0].value
-                             if any(c.field == "protocol_type" for c in rule.conditions)
-                             else 6,
-        "_dst_port":         rule.conditions[0].value
-                             if any(c.field == "_dst_port" for c in rule.conditions)
-                             else 80,
+        "avg_packet_len":     50,
+        "_dst_port":          rule.conditions[0].value
+                              if any(c.field == "_dst_port" for c in rule.conditions)
+                              else 80,
     }
     # Override with exact condition values so the rule triggers
     for c in rule.conditions:

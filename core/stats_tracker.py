@@ -58,7 +58,7 @@ class StatsTracker:
             now = time.time()
             self._flow_times.append(now)
             self._total_flows += 1
-            proto = flow.get("protocol_type", 0)
+            proto = flow.get("dst_port", 0)
             self._protocol_counts[proto] += 1
 
     def record_alert(self, alert: dict):

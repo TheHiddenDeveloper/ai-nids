@@ -57,8 +57,6 @@ def fmt_uptime(secs: float) -> str:
 SEV_COLOR = {"high": "#ef4444", "medium": "#f97316", "low": "#facc15"}
 SEV_ICON  = {"high": "🔴", "medium": "🟠", "low": "🟡"}
 
-PROTO_NAMES = {6: "TCP", 17: "UDP", 1: "ICMP", 0: "Other"}
-
 DARK_LAYOUT = dict(
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
@@ -263,16 +261,23 @@ st.divider()
 col_proto, col_perc = st.columns(2)
 
 with col_proto:
-    st.subheader("Protocol mix (all flows)")
-    if has_flows and "protocol_type" in flows_df.columns:
-        proto = flows_df["protocol_type"].map(
-            lambda x: PROTO_NAMES.get(int(x) if pd.notna(x) else 0, f"Proto {int(x) if pd.notna(x) else '?'}")
-        ).value_counts()
-        fig5 = px.pie(
-            names=proto.index, values=proto.values, hole=0.4,
-            color_discrete_sequence=["#6366f1", "#22c55e", "#f97316", "#888"],
+    st.subheader("Top destination ports (all flows)")
+    if has_flows and "dst_port" in flows_df.columns:
+        top_ports = (
+            flows_df["dst_port"]
+            .dropna()
+            .astype(int)
+            .value_counts()
+            .head(10)
+            .reset_index()
+            .rename(columns={"dst_port": "Port", "count": "Flows"})
         )
-        fig5.update_layout(**DARK_LAYOUT, showlegend=True)
+        fig5 = px.bar(
+            top_ports, x="Flows", y="Port", orientation="h",
+            color_discrete_sequence=["#6366f1"],
+            labels={"Port": "Destination port"},
+        )
+        fig5.update_layout(**DARK_LAYOUT, yaxis={"autorange": "reversed", "type": "category"})
         st.plotly_chart(fig5, use_container_width=True)
     else:
         st.info("Waiting for flow data.")

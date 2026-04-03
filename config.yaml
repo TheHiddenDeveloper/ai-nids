@@ -5,9 +5,9 @@ network:
 
 features:
   flow_timeout: 60            # seconds before a flow expires
-  selected_features:          # subset of CICIDS2017 features
+  selected_features:          # must match FEATURE_COLS in dataset.py / feature_extractor.py
+    - dst_port
     - duration
-    - protocol_type
     - src_bytes
     - dst_bytes
     - packet_count

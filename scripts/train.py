@@ -90,7 +90,7 @@ def load_and_clean(data_dir: Path) -> pd.DataFrame:
     available = [c for c in needed if c in combined.columns]
     missing   = [c for c in needed if c not in combined.columns]
     if missing:
-        logger.warning(f"Columns not found (check CICIDS_COLUMN_MAP): {missing}")
+        logger.warning(f"Columns not found after mapping (check CICIDS_COLUMN_MAP): {missing}")
 
     combined = combined[available].copy()
     combined[FEATURE_COLS] = combined[FEATURE_COLS].replace([np.inf, -np.inf], np.nan)
