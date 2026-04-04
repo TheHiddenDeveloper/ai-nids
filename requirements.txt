@@ -25,3 +25,6 @@ loguru
 python-dotenv
 tqdm
 colorama
+
+# Testing
+pytest
