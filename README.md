@@ -37,7 +37,7 @@ Live network traffic  ──or──  pcap replay
   │         │                             │
   │   FlowAggregator  (5-tuple, 20s TTL)  │
   │         │                             │
-  │   FeatureExtractor  (16 features)     │
+  │   FeatureExtractor  (20 features)     │
   └──────────────┬────────────────────────┘
                  │  flow feature vectors
                  ▼
@@ -143,6 +143,16 @@ streamlit run dashboard/app.py
 # → http://localhost:8501
 ```
 
+### 7. Autonomous Systemd Setup
+
+To convert the NIDS and Dashboard into robust background daemons that start on boot and automatically handle logging limits:
+```bash
+# This will link systemd files and start rotating logs
+bash scripts/deploy.sh
+
+# You can then safely close the terminal
+```
+
 ---
 
 ## Project Structure
@@ -153,8 +163,8 @@ ai_nids/
 ├── monitor/                    # Part 1: capture + feature pipeline
 │   ├── capture.py              #   scapy live capture & pcap replay
 │   ├── flow_aggregator.py      #   bidirectional 5-tuple flow tracking
-│   ├── feature_extractor.py    #   raw flows → 16-feature DataFrame
-│   └── logger.py               #   numpy-safe JSONL logging
+│   ├── feature_extractor.py    #   raw flows → 20-feature DataFrame
+│   └── logger.py               #   Numpy-safe JSONL Rolling Logger
 │
 ├── ai_engine/                  # Part 2: models & training
 │   ├── dataset.py              #   CICIDS2017 loader + column mapping
@@ -180,10 +190,15 @@ ai_nids/
 ├── scripts/
 │   ├── train.py                #   CLI: train RF / AE / both
 │   ├── run_monitor.py          #   CLI: live capture + inference
+│   ├── capture_dataset.py      #   CLI: build canonical local CSV data
+│   ├── train_local_model.py    #   CLI: retrain models natively
+│   ├── deploy.sh               #   CLI: installs Systemd autonomy layer
 │   ├── demo.py                 #   CLI: self-contained demo mode
 │   ├── retrain.py              #   CLI: online retraining scheduler
 │   ├── sig_manager.py          #   CLI: rule management tool
 │   └── gen_test_pcap.py        #   CLI: synthetic attack pcap generator
+│
+├── scripts/systemd/            #   Systemd `.service` configs
 │
 ├── notebooks/
 │   ├── train_explore.ipynb     #   step-by-step training exploration
