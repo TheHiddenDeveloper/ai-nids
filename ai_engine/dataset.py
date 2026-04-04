@@ -30,6 +30,10 @@ CICIDS_COLUMN_MAP = {
     "Flow Packets/s": "flow_packets_per_sec",
     "Fwd Packet Length Max": "fwd_packet_len_max",
     "Bwd Packet Length Max": "bwd_packet_len_max",
+    "Flow IAT Mean": "flow_iat_mean",
+    "Flow IAT Std": "flow_iat_std",
+    "Flow IAT Max": "flow_iat_max",
+    "Flow IAT Min": "flow_iat_min",
     "FIN Flag Count": "fin_flag_count",
     "SYN Flag Count": "syn_flag_count",
     "RST Flag Count": "rst_flag_count",
@@ -43,6 +47,7 @@ FEATURE_COLS = [
     "packet_count", "avg_packet_len", "std_packet_len",
     "flow_bytes_per_sec", "flow_packets_per_sec",
     "fwd_packet_len_max", "bwd_packet_len_max",
+    "flow_iat_mean", "flow_iat_std", "flow_iat_max", "flow_iat_min",
     "fin_flag_count", "syn_flag_count", "rst_flag_count",
     "psh_flag_count", "ack_flag_count",
 ]
