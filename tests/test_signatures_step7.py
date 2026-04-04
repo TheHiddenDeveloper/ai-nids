@@ -237,17 +237,17 @@ class TestSignatureChecker:
         assert checker.rule_count == 2
 
         # Write a new version with three rules
-        new_yaml = MINIMAL_YAML + """\
-  - id: R003
-    name: Extra rule
-    severity: medium
-    enabled: true
-    tags: [test]
-    conditions:
-      - field: rst_flag_count
-        op: gt
-        value: 10
-"""
+        new_yaml = MINIMAL_YAML + textwrap.dedent("""\
+              - id: R003
+                name: Extra rule
+                severity: medium
+                enabled: true
+                tags: [test]
+                conditions:
+                  - field: rst_flag_count
+                    op: gt
+                    value: 10
+        """)
         path.write_text(new_yaml)
         checker.reload()
         assert checker.rule_count == 3
@@ -258,17 +258,17 @@ class TestSignatureChecker:
         assert checker.rule_count == 2
 
         time.sleep(0.5)
-        new_yaml = MINIMAL_YAML + """\
-  - id: R004
-    name: Watcher test rule
-    severity: low
-    enabled: true
-    tags: [test]
-    conditions:
-      - field: fin_flag_count
-        op: gt
-        value: 5
-"""
+        new_yaml = MINIMAL_YAML + textwrap.dedent("""\
+              - id: R004
+                name: Watcher test rule
+                severity: low
+                enabled: true
+                tags: [test]
+                conditions:
+                  - field: fin_flag_count
+                    op: gt
+                    value: 5
+        """)
         path.write_text(new_yaml)
         time.sleep(2.0)   # let watcher detect and reload
         checker.stop_watching()

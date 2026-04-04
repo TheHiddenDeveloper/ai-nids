@@ -18,7 +18,7 @@ from loguru import logger
 from monitor.flow_aggregator import FlowAggregator
 from monitor.feature_extractor import FeatureExtractor
 from monitor.logger import FlowLogger, AlertLogger
-from ai_engine.inference import InferenceEngine
+from ai_engine.ensemble import EnsembleInferenceEngine
 from ai_engine.alert_engine import process_results
 from signatures.checker import SignatureChecker
 from core.event_bus import EventBus
@@ -39,11 +39,10 @@ class NIDSPipeline:
 
     def __init__(
         self,
-        model_path:     str = "data/models/nids_model.joblib",
-        scaler_path:    str = "data/models/scaler.joblib",
+        model_dir:      str = "data/models",
         flow_log_path:  str = "data/flows.jsonl",
         alert_log_path: str = "data/alerts.jsonl",
-        flow_timeout:   int = 60,
+        flow_timeout:   int = 20,
         dedup_window:   int = 60,
         use_signatures: bool = True,
         use_model:      bool = True,
@@ -59,12 +58,13 @@ class NIDSPipeline:
         self.deduplicator = AlertDeduplicator(suppress_window_secs=dedup_window)
         self.sig_checker = SignatureChecker(watch=True) if use_signatures else None
 
-        # AI inference
+        # AI inference (ensemble: RF + Autoencoder)
         self.engine = None
         if use_model:
-            self.engine = InferenceEngine(
-                model_path=model_path,
-                scaler_path=scaler_path,
+            self.engine = EnsembleInferenceEngine(
+                model_dir = model_dir,
+                rf_weight = 0.65,
+                ae_weight = 0.35,
             )
 
         # Loggers

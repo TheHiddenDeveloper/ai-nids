@@ -61,7 +61,7 @@ class Rule:
 
     def matches(self, flow: dict) -> bool:
         """Returns True if ALL conditions match (logical AND)."""
-        if not self.enabled or not self.conditions:
+        if not self.enabled:
             return False
         return all(c.evaluate(flow) for c in self.conditions)
 

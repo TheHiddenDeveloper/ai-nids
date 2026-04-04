@@ -43,6 +43,7 @@ Examples:
     p.add_argument("--interface", "-i",  default="eth0",   help="NIC for live capture (default: eth0)")
     p.add_argument("--pcap",             default=None,      help="Replay a .pcap file instead of live capture")
     p.add_argument("--timeout",   type=int, default=30,    help="Capture window seconds (default: 30)")
+    p.add_argument("--flow-timeout", type=int, default=20, help="Seconds before a flow is considered complete (default: 20)")
     p.add_argument("--no-model",  action="store_true",     help="Signature-only mode (no AI inference)")
     p.add_argument("--dedup",     type=int, default=60,    help="Alert dedup window seconds (default: 60)")
     p.add_argument("--model-dir", default="data/models",  help="Path to trained models directory")
@@ -89,11 +90,10 @@ def main():
     stats = StatsTracker(window_secs=300)
 
     pipeline = NIDSPipeline(
-        model_path     = str(model_dir / "nids_model.joblib"),
-        scaler_path    = str(model_dir / "scaler.joblib"),
+        model_dir      = str(model_dir),
         flow_log_path  = "data/flows.jsonl",
         alert_log_path = "data/alerts.jsonl",
-        flow_timeout   = 60,
+        flow_timeout   = args.flow_timeout,
         dedup_window   = args.dedup,
         use_model      = not args.no_model,
         use_signatures = True,
