@@ -31,15 +31,25 @@ FLOW_LOG   = Path("data/flows.jsonl")
 
 # ── Data helpers ──────────────────────────────────────────────────────────────
 
+import sqlite3
+
 @st.cache_data(ttl=1)  # cache lightly for UI interactions
-def load_jsonl(path: str, n: int = 1000) -> pd.DataFrame:
-    p = Path(path)
-    if not p.exists() or p.stat().st_size == 0:
+def load_from_db(table: str, limit: int = 2000) -> pd.DataFrame:
+    db_path = Path("data/nids.db")
+    if not db_path.exists():
         return pd.DataFrame()
     try:
-        lines = p.read_text().strip().split("\n")
-        lines = [l for l in lines if l][-n:]
-        return pd.DataFrame([json.loads(l) for l in lines])
+        conn = sqlite3.connect(db_path)
+        # Fast indexed limit query
+        df_raw = pd.read_sql_query(f"SELECT raw_json FROM {table} ORDER BY timestamp DESC LIMIT {limit}", conn)
+        conn.close()
+        
+        if df_raw.empty:
+            return pd.DataFrame()
+            
+        # Parse JSON and reverse to restore chronological time-series order
+        records = [json.loads(j) for j in df_raw["raw_json"].iloc[::-1]]
+        return pd.DataFrame(records)
     except Exception:
         return pd.DataFrame()
 
@@ -105,8 +115,8 @@ col_time.markdown(
 
 # ── Load data ─────────────────────────────────────────────────────────────────
 
-alerts_df = load_jsonl(str(ALERT_LOG), n=history_lim)
-flows_df  = load_jsonl(str(FLOW_LOG),  n=history_lim)
+alerts_df = load_from_db("alerts", limit=history_lim)
+flows_df  = load_from_db("flows",  limit=history_lim)
 
 if not alerts_df.empty and "severity" in alerts_df.columns and sev_filter:
     alerts_df = alerts_df[alerts_df["severity"].isin(sev_filter)]
