@@ -67,9 +67,9 @@ class NIDSPipeline:
                 ae_weight = 0.35,
             )
 
-        # Loggers
-        self.flow_logger  = FlowLogger(flow_log_path)
-        self.alert_logger = AlertLogger(alert_log_path)
+        # Loggers (now use SQLite via monitor.db)
+        self.flow_logger  = FlowLogger()
+        self.alert_logger = AlertLogger()
 
         # Event bus and stats (can be injected or created fresh)
         self.bus   = event_bus   or EventBus()

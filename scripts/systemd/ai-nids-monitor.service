@@ -6,10 +6,10 @@ After=network.target
 Type=simple
 User=root
 # Replace /home/dev/Projects/ai_nids with your actual deployment path if moved!
-WorkingDirectory=/home/dev/Projects/ai_nids
+WorkingDirectory={{PROJECT_ROOT}}
 
 # Assuming the virtual environment is inside the project dir: 'ai-venv'
-ExecStart=/home/dev/Projects/ai_nids/ai-venv/bin/python scripts/run_monitor.py --interface eth0 --flow-timeout 20
+ExecStart="{{PROJECT_ROOT}}/ai-venv/bin/python" scripts/run_monitor.py --interface {{INTERFACE}} --flow-timeout 20
 Restart=always
 RestartSec=5
 
