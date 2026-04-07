@@ -143,7 +143,7 @@ class NIDSPipeline:
             for flow in flows:
                 raw_results.append({
                     "score": 0.0,
-                    "label": "BENIGN",
+                    "label": "UNCERTAIN",
                     "_src_ip":    flow.get("_src_ip"),
                     "_dst_ip":    flow.get("_dst_ip"),
                     "_src_port":  flow.get("_src_port"),

@@ -51,6 +51,7 @@ def process_results(
 
         alert = {**result}
         alert["severity"] = severity or "low"
+        alert["label"]    = "ATTACK"  # If it's an alert, it's an attack/anomaly
 
         if sig_match:
             alert["signature_match"] = sig_match
