@@ -13,6 +13,7 @@ build/
 venv/
 env/
 .venv/
+ai-venv/
 
 # Generated data (do not commit)
 data/raw/

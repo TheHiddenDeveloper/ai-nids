@@ -13,7 +13,7 @@ keras
 joblib
 imbalanced-learn
 
-# Visualization & dashboard
+# Visualization & dashboardB
 streamlit
 plotly
 matplotlib
@@ -25,3 +25,4 @@ loguru
 python-dotenv
 tqdm
 colorama
+python3.10 --version
