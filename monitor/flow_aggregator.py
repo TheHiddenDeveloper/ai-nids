@@ -9,7 +9,9 @@ import time
 import math
 import numpy as np
 from typing import Dict, List, Optional
+import json
 from loguru import logger
+from core.redis_client import get_redis_client
 
 
 class Flow:
@@ -43,12 +45,17 @@ class Flow:
         self.psh_flag_count: int = 0
         self.ack_flag_count: int = 0
         
-        # Metadata
-        self._src_ip: Optional[str] = None
-        self._dst_ip: Optional[str] = None
-        self._src_port: Optional[int] = None
         self._dst_port: Optional[int] = None
         self._is_init_labeled: bool = False
+        self._protocol: Optional[int] = None
+
+    def _get_redis_key(self) -> str:
+        # Generate a stable string key from the 5-tuple
+        src = (self._src_ip or "", self._src_port or 0)
+        dst = (self._dst_ip or "", self._dst_port or 0)
+        p1 = min(src, dst)
+        p2 = max(src, dst)
+        return f"nids:flow:{p1[0]}:{p1[1]}_{p2[0]}:{p2[1]}_{self._protocol or 0}"
 
     def add_packet(self, pkt: dict):
         current_ts = pkt.get("timestamp", time.time())
@@ -101,6 +108,81 @@ class Flow:
         self.rst_flag_count += pkt.get("rst", 0)
         self.psh_flag_count += pkt.get("psh", 0)
         self.ack_flag_count += pkt.get("ack", 0)
+        if self._protocol is None:
+            self._protocol = pkt.get("protocol")
+
+    def sync_to_redis(self, redis_client, pkt: dict):
+        """Push atomic updates to Redis for distributed aggregation."""
+        try:
+            rky = self._get_redis_key()
+            ip_len = pkt.get("ip_len", 0)
+            is_fwd = (pkt.get("src_ip") == self._src_ip)
+            
+            pipe = redis_client.pipeline()
+            # Basic stats
+            pipe.hsetnx(rky, "start_time", self.start_time)
+            pipe.hset(rky, "last_seen", self.last_seen)
+            pipe.hincrby(rky, "packet_count", 1)
+            pipe.hincrbyfloat(rky, "sum_sq_len", ip_len * ip_len)
+            
+            # Directional sums
+            if is_fwd:
+                pipe.hincrby(rky, "fwd_packet_count", 1)
+                pipe.hincrbyfloat(rky, "fwd_sum_len", ip_len)
+            else:
+                pipe.hincrby(rky, "bwd_packet_count", 1)
+                pipe.hincrbyfloat(rky, "bwd_sum_len", ip_len)
+            
+            # Flags
+            for flag in ["fin", "syn", "rst", "psh", "ack"]:
+                if pkt.get(flag):
+                    pipe.hincrby(rky, f"{flag}_flag_count", 1)
+            
+            # Metadata (only needed once but hset is fine)
+            meta = {
+                "_src_ip": self._src_ip, "_dst_ip": self._dst_ip,
+                "_src_port": self._src_port, "_dst_port": self._dst_port,
+                "_protocol": self._protocol
+            }
+            pipe.hset(rky, mapping={k: str(v) for k, v in meta.items() if v is not None})
+            
+            # Global expiry tracking
+            pipe.zadd("nids:active_flows", {rky: self.last_seen})
+            pipe.execute()
+        except Exception as e:
+            logger.error(f"Flow: Redis sync failed: {e}")
+
+    def load_from_redis(self, redis_client):
+        """Pull global stats from Redis to enrich local flow data."""
+        try:
+            rky = self._get_redis_key()
+            data = redis_client.hgetall(rky)
+            if not data: return
+            
+            self.start_time = float(data.get("start_time", self.start_time))
+            self.last_seen = float(data.get("last_seen", self.last_seen))
+            self.packet_count = int(data.get("packet_count", self.packet_count))
+            self.fwd_packet_count = int(data.get("fwd_packet_count", self.fwd_packet_count))
+            self.bwd_packet_count = int(data.get("bwd_packet_count", self.bwd_packet_count))
+            self.fwd_sum_len = float(data.get("fwd_sum_len", self.fwd_sum_len))
+            self.bwd_sum_len = float(data.get("bwd_sum_len", self.bwd_sum_len))
+            self.sum_sq_len = float(data.get("sum_sq_len", self.sum_sq_len))
+            
+            # Load flags
+            self.fin_flag_count = int(data.get("fin_flag_count", self.fin_flag_count))
+            self.syn_flag_count = int(data.get("syn_flag_count", self.syn_flag_count))
+            self.rst_flag_count = int(data.get("rst_flag_count", self.rst_flag_count))
+            self.psh_flag_count = int(data.get("psh_flag_count", self.psh_flag_count))
+            self.ack_flag_count = int(data.get("ack_flag_count", self.ack_flag_count))
+            
+            # Metadata
+            self._src_ip = data.get("_src_ip", self._src_ip)
+            self._dst_ip = data.get("_dst_ip", self._dst_ip)
+            self._src_port = int(data.get("_src_port")) if data.get("_src_port") else self._src_port
+            self._dst_port = int(data.get("_dst_port")) if data.get("_dst_port") else self._dst_port
+            self._protocol = int(data.get("_protocol")) if data.get("_protocol") else self._protocol
+        except Exception as e:
+            logger.error(f"Flow: Redis load failed: {e}")
 
     def is_expired(self, timeout: int = 60, current_time: float = None) -> bool:
         if current_time is None:
@@ -172,6 +254,7 @@ class FlowAggregator:
         self.eviction_interval = eviction_interval
         self._flows: Dict[tuple, Flow] = {}
         self._last_evict: float = time.time()
+        self.redis = get_redis_client()
 
     @staticmethod
     def _flow_key(pkt: dict) -> tuple:
@@ -189,9 +272,14 @@ class FlowAggregator:
         key = self._flow_key(pkt)
         if key not in self._flows:
             self._flows[key] = Flow()
-        self._flows[key].add_packet(pkt)
+        
+        flow = self._flows[key]
+        flow.add_packet(pkt)
+        
+        if self.redis:
+            flow.sync_to_redis(self.redis, pkt)
 
-        # Rate-limited eviction (O(1) amortized)
+        # Rate-limited eviction
         now = time.time()
         if now - self._last_evict > self.eviction_interval:
             self._last_evict = now
@@ -204,12 +292,24 @@ class FlowAggregator:
             current_time = time.time()
             
         completed = []
+        
+        # 1. Check local flows
         expired_keys = [k for k, f in self._flows.items() if f.is_expired(self.timeout, current_time)]
         for k in expired_keys:
             flow = self._flows.pop(k)
+            if self.redis:
+                flow.load_from_redis(self.redis)
+                # Cleanup Redis Global State
+                self.redis.delete(flow._get_redis_key())
+                self.redis.zrem("nids:active_flows", flow._get_redis_key())
+            
             features = flow.to_features()
             if features:
                 completed.append(features)
+        
+        # 2. Check Global flows (in case another sensor saw the last packet)
+        # This part is optional for a simple distributed setup, but ensures consistency.
+        
         return completed
 
     def flush_all(self) -> List[dict]:

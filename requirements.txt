@@ -26,4 +26,6 @@ python-dotenv
 tqdm
 colorama
 redis
+psutil
+requests
 python3.10 --version
