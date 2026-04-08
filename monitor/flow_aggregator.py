@@ -21,7 +21,11 @@ class Flow:
         
         # O(1) state variables instead of storing all packets
         self.packet_count: int = 0
-        self.sum_len: float = 0.0
+        self.fwd_packet_count: int = 0
+        self.bwd_packet_count: int = 0
+        
+        self.fwd_sum_len: float = 0.0
+        self.bwd_sum_len: float = 0.0
         self.sum_sq_len: float = 0.0
         self.fwd_packet_len_max: float = 0.0
         self.bwd_packet_len_max: float = 0.0
@@ -44,15 +48,28 @@ class Flow:
         self._dst_ip: Optional[str] = None
         self._src_port: Optional[int] = None
         self._dst_port: Optional[int] = None
+        self._is_init_labeled: bool = False
 
     def add_packet(self, pkt: dict):
         current_ts = pkt.get("timestamp", time.time())
+        is_syn_init = (pkt.get("syn") == 1 and pkt.get("ack") == 0)
+        
         if self.packet_count == 0:
             self.start_time = current_ts
             self._src_ip = pkt.get("src_ip")
             self._dst_ip = pkt.get("dst_ip")
             self._src_port = pkt.get("src_port")
             self._dst_port = pkt.get("dst_port")
+            if is_syn_init: self._is_init_labeled = True
+        elif is_syn_init and not self._is_init_labeled:
+            # Re-orient! We saw a response/middle packet first, now we see the initiator.
+            self._src_ip, self._dst_ip = self._dst_ip, self._src_ip
+            self._src_port, self._dst_port = self._dst_port, self._src_port
+            # Swap accumulated directional counters
+            self.fwd_packet_count, self.bwd_packet_count = self.bwd_packet_count, self.fwd_packet_count
+            self.fwd_sum_len, self.bwd_sum_len = self.bwd_sum_len, self.fwd_sum_len
+            self.fwd_packet_len_max, self.bwd_packet_len_max = self.bwd_packet_len_max, self.fwd_packet_len_max
+            self._is_init_labeled = True
         else:
             iat = max(0.0, current_ts - self.last_seen)
             self.sum_iat += iat
@@ -64,13 +81,20 @@ class Flow:
         self.packet_count += 1
         
         ip_len = pkt.get("ip_len", 0)
-        self.sum_len += ip_len
-        self.sum_sq_len += ip_len * ip_len
+        is_fwd = (pkt.get("src_ip") == self._src_ip)
         
-        # Original code used the same max for both directions
-        if ip_len > self.fwd_packet_len_max:
-            self.fwd_packet_len_max = float(ip_len)
-            self.bwd_packet_len_max = float(ip_len)
+        if is_fwd:
+            self.fwd_packet_count += 1
+            self.fwd_sum_len += ip_len
+            if ip_len > self.fwd_packet_len_max:
+                self.fwd_packet_len_max = float(ip_len)
+        else:
+            self.bwd_packet_count += 1
+            self.bwd_sum_len += ip_len
+            if ip_len > self.bwd_packet_len_max:
+                self.bwd_packet_len_max = float(ip_len)
+                
+        self.sum_sq_len += ip_len * ip_len
             
         self.fin_flag_count += pkt.get("fin", 0)
         self.syn_flag_count += pkt.get("syn", 0)
@@ -92,7 +116,8 @@ class Flow:
         if duration <= 0:
             duration = 1e-6
 
-        avg_packet_len = self.sum_len / self.packet_count
+        total_len = self.fwd_sum_len + self.bwd_sum_len
+        avg_packet_len = total_len / self.packet_count
         
         # Variance = (sum_sq / count) - (mean^2)
         variance = (self.sum_sq_len / self.packet_count) - (avg_packet_len * avg_packet_len)
@@ -107,12 +132,14 @@ class Flow:
         return {
             "dst_port": self._dst_port or 0,
             "duration": round(duration, 6),
-            "src_bytes": self.sum_len,
-            "dst_bytes": self.sum_len,
+            "src_bytes": self.fwd_sum_len,
+            "dst_bytes": self.bwd_sum_len,
             "packet_count": self.packet_count,
+            "fwd_packet_count": self.fwd_packet_count,
+            "bwd_packet_count": self.bwd_packet_count,
             "avg_packet_len": float(avg_packet_len),
             "std_packet_len": std_packet_len,
-            "flow_bytes_per_sec": self.sum_len / duration,
+            "flow_bytes_per_sec": total_len / duration,
             "flow_packets_per_sec": self.packet_count / duration,
             "fwd_packet_len_max": self.fwd_packet_len_max,
             "bwd_packet_len_max": self.bwd_packet_len_max,

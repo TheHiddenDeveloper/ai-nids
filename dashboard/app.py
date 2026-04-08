@@ -14,10 +14,15 @@ Full real-time view:
   - Score percentile gauge
 """
 
+import sys
+from pathlib import Path
+
+# Add project root to path so 'monitor' can be imported
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import json
 import time
 import math
-from pathlib import Path
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -32,6 +37,7 @@ FLOW_LOG   = Path("data/flows.jsonl")
 # ── Data helpers ──────────────────────────────────────────────────────────────
 
 import sqlite3
+from monitor.db import clear_db_data
 
 @st.cache_data(ttl=1)  # cache lightly for UI interactions
 def load_from_db(table: str, limit: int = 2000) -> pd.DataFrame:
@@ -228,6 +234,19 @@ if not alerts_df.empty and "signature_match" in alerts_df.columns:
     all_sigs = sorted(alerts_df["signature_match"].dropna().unique().tolist())
 sig_filter = st.sidebar.multiselect("Filter by Signature", all_sigs)
 
+# ── System Maintenance ────────────────────────────────────────────────────────
+st.sidebar.markdown("---")
+with st.sidebar.expander("🛠️ System Maintenance"):
+    st.warning("Destructive Actions")
+    confirm_wipe = st.checkbox("Confirm Data Wipe")
+    if st.button("Wipe System Data", disabled=not confirm_wipe, type="primary"):
+        if clear_db_data():
+            st.success("Internal data wiped successfully!")
+            time.sleep(1)
+            st.rerun()
+        else:
+            st.error("Failed to wipe data. Check logs.")
+
 # ── Apply Filtering ───────────────────────────────────────────────────────────
 if not alerts_df.empty and "severity" in alerts_df.columns and sev_filter:
     alerts_df = alerts_df[alerts_df["severity"].isin(sev_filter)]
@@ -370,7 +389,7 @@ with tab_alerts:
         if "_alerted_at" in display.columns:
             display["_alerted_at"] = pd.to_datetime(
                 display["_alerted_at"], unit="s", utc=True
-            ).dt.strftime("%H:%M:%S")
+            ).dt.strftime("%Y-%m-%d %H:%M:%S")
             display.rename(columns={"_alerted_at": "time"}, inplace=True)
 
         if "score" in display.columns:
