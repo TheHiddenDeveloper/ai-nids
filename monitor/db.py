@@ -61,3 +61,24 @@ def init_db():
 
 # Initialize schema on module import
 init_db()
+
+def clear_db_data():
+    """Wipes all data from flows and alerts tables, and truncates log files."""
+    conn = get_db_connection()
+    try:
+        with conn:
+            conn.execute("DELETE FROM flows")
+            conn.execute("DELETE FROM alerts")
+            # Vacuum to reclaim space
+            conn.execute("VACUUM")
+        
+        # Also clear jsonl files and log file
+        for filename in ["data/flows.jsonl", "data/alerts.jsonl", "data/nids.log"]:
+            p = Path(filename)
+            if p.exists():
+                p.write_text("")
+                
+        return True
+    except Exception as e:
+        print(f"Failed to clear data: {e}")
+        return False

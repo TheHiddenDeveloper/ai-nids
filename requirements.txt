@@ -25,4 +25,5 @@ loguru
 python-dotenv
 tqdm
 colorama
+redis
 python3.10 --version

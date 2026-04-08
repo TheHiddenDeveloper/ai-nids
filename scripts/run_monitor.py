@@ -57,7 +57,7 @@ def configure_logging(verbose: bool):
     logger.add(
         sys.stderr,
         level=level,
-        format="<green>{time:HH:mm:ss}</green> | <level>{level:<8}</level> | {message}",
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level:<8}</level> | {message}",
         colorize=True,
     )
     logger.add(
