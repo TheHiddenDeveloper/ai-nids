@@ -17,6 +17,8 @@ import sys
 import time
 import signal
 import argparse
+import os
+import psutil
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -139,11 +141,27 @@ def main():
 
     # ── Live capture loop ─────────────────────────────────────────────────────
     cap = PacketCapture(interface=args.interface, timeout=args.timeout)
+    process = psutil.Process(os.getpid())
     window = 0
+    
     while True:
         window += 1
         cap.start(callback=pipeline.ingest_packet)
         snap = stats.snapshot()
+        
+        # Broadcast system health & performance
+        try:
+            health = {
+                "cpu_percent": process.cpu_percent(),
+                "mem_rss_mb": process.memory_info().rss / (1024 * 1024),
+                "threads": process.num_threads(),
+                "active_flows": pipeline.active_flows,
+                "metrics": snap
+            }
+            bus.publish("stats", health)
+        except Exception as e:
+            logger.warning(f"Failed to publish health stats: {e}")
+
         logger.info(
             f"Window {window:>4} | "
             f"active_flows={pipeline.active_flows:>4} | "

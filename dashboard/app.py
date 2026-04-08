@@ -29,6 +29,12 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+from core.event_bus import bus
+from core.redis_client import get_redis_client
+from core.geo_utils import GeoLookup
+
+# Initialize Geo Services
+geo_lookup = GeoLookup()
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 ALERT_LOG  = Path("data/alerts.jsonl")
@@ -38,6 +44,44 @@ FLOW_LOG   = Path("data/flows.jsonl")
 
 import sqlite3
 from monitor.db import clear_db_data
+
+# ── Session State for Real-time Console ───────────────────────────────────────
+if "console_logs" not in st.session_state:
+    st.session_state.console_logs = []
+if "engine_stats" not in st.session_state:
+    st.session_state.engine_stats = {}
+
+def live_log_handler(alert):
+    """Callback for Redis Pub/Sub alerts."""
+    ts = datetime.now().strftime("%H:%M:%S")
+    sev_icon = SEV_ICON.get(alert.get("severity", "low"), "🛡️")
+    msg = f"{sev_icon} [{ts}] {alert.get('label', 'ALERT')} | {alert.get('_src_ip', '?')} -> {alert.get('_dst_ip', '?')} ({alert.get('signature_match', 'Unknown Sig')})"
+    st.session_state.console_logs.append(msg)
+    if len(st.session_state.console_logs) > 40:
+        st.session_state.console_logs.pop(0)
+
+def live_stats_handler(stats):
+    """Callback for Redis Pub/Sub engine stats."""
+    st.session_state.engine_stats = stats
+
+# Subscribe session state once per dashboard run
+if "subscribed" not in st.session_state:
+    bus.subscribe("alert", live_log_handler)
+    bus.subscribe("stats", live_stats_handler)
+    st.session_state.subscribed = True
+
+def send_firewall_command(action, ip):
+    """Sends a block/unblock command to the FirewallEngine via Redis."""
+    redis = get_redis_client()
+    if redis:
+        try:
+            cmd = {"action": action, "ip": ip}
+            redis.publish("nids:commands", json.dumps(cmd))
+            st.toast(f"RULE EMITTED: {action.upper()} {ip}", icon="🔥")
+        except Exception as e:
+            st.error(f"Firewall Communication Error: {e}")
+    else:
+        st.error("Redis disconnected. Cannot send commands.")
 
 @st.cache_data(ttl=1)  # cache lightly for UI interactions
 def load_from_db(table: str, limit: int = 2000) -> pd.DataFrame:
@@ -82,7 +126,17 @@ DARK_LAYOUT = dict(
     yaxis=dict(gridcolor="#222", zeroline=False),
 )
 
-def draw_metric_card(label: str, value: str, icon: str, color: str = "#10b981"):
+def draw_metric_card(label: str, value: str, icon: str, color: str = "#10b981", delta: float = None, invert_delta: bool = False):
+    delta_html = ""
+    if delta is not None:
+        arrow = "↗" if delta >= 0 else "↘"
+        # For alerts, up is usually RED (bad), down is GREEN (good)
+        if invert_delta:
+            d_color = "#ef4444" if delta > 0 else "#10b981"
+        else:
+            d_color = "#10b981" if delta >= 0 else "#64748b"
+        delta_html = f"<div style='font-size: 0.85rem; font-weight: 600; color: {d_color};'>{arrow} {abs(delta):.1f}%</div>"
+
     st.markdown(f"""
     <div style="
         background: rgba(30, 41, 59, 0.4);
@@ -94,7 +148,10 @@ def draw_metric_card(label: str, value: str, icon: str, color: str = "#10b981"):
         box-shadow: 0 4px 20px rgba(0,0,0,0.4);
         margin-bottom: 1rem;
     ">
-        <div style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1.2px; font-weight: 600;">{label}</div>
+        <div style="display: flex; justify-content: space-between; align-items: start;">
+            <div style="color: #64748b; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1.2px; font-weight: 600;">{label}</div>
+            {delta_html}
+        </div>
         <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 0.5rem;">
             <div style="font-size: 1.7rem; font-weight: 700; color: #f1f5f9; font-family: 'Inter', sans-serif;">{value}</div>
             <div style="font-size: 1.4rem; opacity: 0.8;">{icon}</div>
@@ -142,7 +199,7 @@ def draw_sankey(df):
         link=dict(source=links["_src_ip"].map(node_map), target=links["_dst_ip"].map(node_map), value=links["value"], color="rgba(16, 185, 129, 0.2)")
     )])
     fig.update_layout(title_text="Network Traffic Flow", font_size=10, **DARK_LAYOUT)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key="sankey_traffic")
 
 def draw_intensity_heatmap(df):
     if df.empty or "_alerted_at" not in df.columns: return
@@ -157,8 +214,110 @@ def draw_intensity_heatmap(df):
     
     fig = px.imshow(pivot, labels=dict(x="Hour of Day", y="Day of Week", color="Alerts"), x=pivot.columns, y=pivot.index, color_continuous_scale="Viridis")
     fig.update_layout(**DARK_LAYOUT, height=250)
-    fig.update_coloraxes(showscale=False)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key="intensity_heatmap")
+
+def draw_threat_map(df):
+    if df.empty or "_src_ip" not in df.columns: return
+    
+    # Get top 30 source IPs to resolve (limited for performance)
+    top_ips = df["_src_ip"].value_counts().head(30).index.tolist()
+    
+    map_data = []
+    for ip in top_ips:
+        loc = geo_lookup.get_location(ip)
+        if loc:
+            ip_alerts = df[df["_src_ip"] == ip]
+            max_sev = ip_alerts["severity"].map({"high": 3, "medium": 2, "low": 1}).max()
+            map_data.append({
+                "lat": loc["lat"],
+                "lon": loc["lon"],
+                "IP": ip,
+                "Location": f"{loc['city']}, {loc['country']}",
+                "Alerts": len(ip_alerts),
+                "Severity": max_sev,
+                "ISP": loc.get("isp", "Unknown")
+            })
+    
+    if not map_data:
+        st.info("Waiting for geographical threat data...")
+        return
+
+    df_map = pd.DataFrame(map_data)
+    
+    fig = px.scatter_geo(
+        df_map, lat="lat", lon="lon",
+        size="Alerts", color="Severity",
+        hover_name="IP", hover_data=["Location", "Alerts", "ISP"],
+        color_continuous_scale="Reds",
+        projection="natural earth",
+        title="Global Attack Hotspots"
+    )
+    fig.update_layout(**DARK_LAYOUT, height=450, coloraxis_showscale=False)
+    # Natural earth map styling
+    st.plotly_chart(fig, use_container_width=True, key="global_threat_map")
+
+def get_comparison_stats():
+    """Returns (current_24h, prev_24h) for key metrics."""
+    db_path = Path("data/nids.db")
+    if not db_path.exists(): return None
+    
+    now = time.time()
+    d1_start, d1_end = now - 86400, now
+    d2_start, d2_end = now - 172800, now - 86400
+    
+    try:
+        conn = sqlite3.connect(db_path)
+        def q(sql, params): return conn.execute(sql, params).fetchone()[0]
+        
+        stats = {
+            "flows": (
+                q("SELECT COUNT(*) FROM flows WHERE timestamp >= ?", (d1_start,)),
+                q("SELECT COUNT(*) FROM flows WHERE timestamp >= ? AND timestamp < ?", (d2_start, d2_end))
+            ),
+            "alerts": (
+                q("SELECT COUNT(*) FROM alerts WHERE timestamp >= ?", (d1_start,)),
+                q("SELECT COUNT(*) FROM alerts WHERE timestamp >= ? AND timestamp < ?", (d2_start, d2_end))
+            ),
+            "high": (
+                q("SELECT COUNT(*) FROM alerts WHERE timestamp >= ? AND severity='high'", (d1_start,)),
+                q("SELECT COUNT(*) FROM alerts WHERE timestamp >= ? AND timestamp < ? AND severity='high'", (d2_start, d2_end))
+            )
+        }
+        conn.close()
+        return stats
+    except:
+        return None
+
+def draw_trend_comparison(df):
+    if df.empty or "_alerted_at" not in df.columns: return
+    
+    now = time.time()
+    # Bucket into hours for the last 48 hours
+    df_trend = df[df["_alerted_at"] > (now - 172800)].copy()
+    if df_trend.empty: return
+
+    df_trend["dt"] = pd.to_datetime(df_trend["_alerted_at"], unit="s", utc=True)
+    df_trend["hour_rel"] = ((now - df_trend["_alerted_at"]) // 3600).astype(int)
+    
+    # Split into Today (0-23h ago) and Yesterday (24-47h ago)
+    today = df_trend[df_trend["hour_rel"] < 24].groupby("hour_rel").size().reindex(range(24), fill_value=0)
+    yest  = df_trend[(df_trend["hour_rel"] >= 24) & (df_trend["hour_rel"] < 48)].groupby("hour_rel").size()
+    yest.index = yest.index - 24 # Align hours
+    yest = yest.reindex(range(24), fill_value=0)
+    
+    fig = go.Figure()
+    # Reverse index so 0 is 'now' and 23 is '23h ago'
+    fig.add_trace(go.Scatter(x=list(range(24)), y=today.values[::-1], name="Today", fill='tozeroy', line=dict(color='#10b981', width=3)))
+    fig.add_trace(go.Scatter(x=list(range(24)), y=yest.values[::-1], name="Yesterday", line=dict(color='#64748b', dash='dash')))
+    
+    fig.update_layout(**DARK_LAYOUT)
+    fig.update_layout(
+        height=200, showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        xaxis=dict(title="Hours ago", tickvals=[0, 6, 12, 18, 23]),
+        yaxis=dict(title="Alerts")
+    )
+    st.plotly_chart(fig, use_container_width=True, key="trend_comparison")
 
 # ── Page config ───────────────────────────────────────────────────────────────
 
@@ -236,6 +395,12 @@ sig_filter = st.sidebar.multiselect("Filter by Signature", all_sigs)
 
 # ── System Maintenance ────────────────────────────────────────────────────────
 st.sidebar.markdown("---")
+
+# Health Section
+redis_conn = get_redis_client()
+redis_status = "Connected ✅" if redis_conn else "Disconnected ❌"
+st.sidebar.markdown(f"**Engine Health**  \n`Redis:` {redis_status}")
+
 with st.sidebar.expander("🛠️ System Maintenance"):
     st.warning("Destructive Actions")
     confirm_wipe = st.checkbox("Confirm Data Wipe")
@@ -246,6 +411,22 @@ with st.sidebar.expander("🛠️ System Maintenance"):
             st.rerun()
         else:
             st.error("Failed to wipe data. Check logs.")
+
+with st.sidebar.expander("🛡️ Managed Blocked IPs"):
+    if redis_conn:
+        blocked_ips = redis_conn.smembers("nids:blocked:ips")
+        if blocked_ips:
+            for ip in sorted(list(blocked_ips)):
+                bc1, bc2 = st.columns([3, 1])
+                bc1.code(ip)
+                if bc2.button("🔓", key=f"unblock_{ip}", help=f"Unblock {ip}"):
+                    send_firewall_command("unblock", ip)
+                    time.sleep(0.5)
+                    st.rerun()
+        else:
+            st.info("No active IP blocks.")
+    else:
+        st.error("Redis down — cannot fetch blocks.")
 
 # ── Apply Filtering ───────────────────────────────────────────────────────────
 if not alerts_df.empty and "severity" in alerts_df.columns and sev_filter:
@@ -295,36 +476,54 @@ col_title.markdown(f"""
         </div>
     </div>
 """, unsafe_allow_html=True)
+col_time.markdown(f"<div style='text-align:right; color:#64748b; font-size:0.9rem; padding-top:10px;'>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</div>", unsafe_allow_html=True)
 
-col_time.markdown(
-    f"<div style='text-align:right;padding-top:10px;color:#64748b;font-size:12px; font-family:JetBrains Mono'>"
-    f"NODE_SYS_CLK: {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}</div>",
-    unsafe_allow_html=True,
-)
+# ── Engine Health Performance Metrics ─────────────────────────────────────────
+if st.session_state.engine_stats:
+    es = st.session_state.engine_stats
+    p1, p2, p3, p4 = st.columns(4)
+    p1.metric("Engine CPU", f"{es.get('cpu_percent', 0):.1f}%")
+    p2.metric("Engine RAM", f"{es.get('mem_rss_mb', 0):.1f} MB")
+    p3.metric("Threads", es.get("threads", 0))
+    p4.metric("Live Flows", es.get("active_flows", 0))
+
+# ── Live Console Feature ──────────────────────────────────────────────────────
+if st.session_state.console_logs:
+    with st.expander("📟 LIVE ATTACK CONSOLE", expanded=True):
+        console_text = "\n".join(st.session_state.console_logs[::-1])
+        st.code(console_text, language="text")
 
 # ── Alert Ticker ──────────────────────────────────────────────────────────────
 draw_alert_ticker(alerts_df)
 
 # ── KPI row ───────────────────────────────────────────────────────────────────
 
+# Calculate Trends
+comp = get_comparison_stats()
+def get_delta(key):
+    if not comp: return None
+    cur, prev = comp[key]
+    if prev == 0: return 100.0 if cur > 0 else 0.0
+    return ((cur - prev) / prev) * 100.0
+
 k1, k2, k3, k4, k5, k6 = st.columns(6)
-with k1: draw_metric_card("Total Traffic", f"{total_flows:,}", "📊", "#6366f1")
-with k2: draw_metric_card("Total Alerts",  f"{total_alerts:,}", "🚨", "#f59e0b")
-with k3: draw_metric_card("Critical Hits", f"{high_count:,}", "🔥", "#ef4444")
+with k1: draw_metric_card("Total Traffic", f"{total_flows:,}", "📊", "#6366f1", delta=get_delta("flows"))
+with k2: draw_metric_card("Total Alerts",  f"{total_alerts:,}", "🚨", "#f59e0b", delta=get_delta("alerts"), invert_delta=True)
+with k3: draw_metric_card("Critical Hits", f"{high_count:,}", "🔥", "#ef4444", delta=get_delta("high"), invert_delta=True)
 with k4: draw_metric_card("Threat %",      attack_rate, "📉", "#ef4444" if total_alerts > 10 else "#10b981")
 with k5: draw_metric_card("Monitoring",    f"{len(sev_filter)} types", "🔍", "#10b981")
 with k6: draw_metric_card("Session Uptime", uptime_str, "⏱️", "#a855f7")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# ── Tabs ──────────────────────────────────────────────────────────────────────
+# ── Main Tabs ─────────────────────────────────────────────────────────────────
 
-tab_overview, tab_alerts, tab_analytics = st.tabs(["📊 Overview", "🚨 Alerts Explorer", "📈 Analytics & ML"])
+tab_overview, tab_alerts, tab_incidents, tab_analytics = st.tabs(["📊 Overview", "🚨 Alerts Explorer", "🔥 Active Incidents", "📈 Analytics & ML"])
 
 # == TAB 1: OVERVIEW ==
 with tab_overview:
-    # Row 1: Timeline and Sankey
-    col_tl, col_sk = st.columns([3, 2])
+    # Row 1: Timeline and Comparison
+    col_tl, col_tr = st.columns([3, 2])
     with col_tl:
         st.subheader("Alert timeline")
         if has_alerts and "_alerted_at" in alerts_df.columns and "severity" in alerts_df.columns:
@@ -335,12 +534,21 @@ with tab_overview:
             fig = px.area(tdf, x="time", y="count", color_discrete_sequence=["#10b981"], labels={"count": "Alerts", "time": ""})
             fig.update_traces(line_width=2, fillcolor="rgba(16,185,129,0.1)")
             fig.update_layout(**DARK_LAYOUT)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, use_container_width=True, key="main_timeline")
         else:
             st.info("No matching alerts found.")
     
+    with col_tr:
+        st.subheader("24h Volume Comparison")
+        draw_trend_comparison(alerts_df)
+
+    # Row 2: Sankey and Map
+    col_sk, col_map = st.columns([2, 3])
     with col_sk:
         draw_sankey(flows_df)
+    
+    with col_map:
+        draw_threat_map(alerts_df)
 
     # Row 2: Severity and Intensity Heatmap
     col_sev, col_hm = st.columns([2, 3])
@@ -353,7 +561,7 @@ with tab_overview:
                                     textinfo="label+percent", textfont_size=11))
             fig2.update_layout(**DARK_LAYOUT)
             fig2.update_layout(showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
-            st.plotly_chart(fig2, use_container_width=True)
+            st.plotly_chart(fig2, use_container_width=True, key="severity_pie")
         else:
             st.info("No severity data available.")
             
@@ -368,7 +576,7 @@ with tab_overview:
         fig4 = px.bar(top, x="Alerts", y="Source IP", orientation="h", color="Alerts", color_continuous_scale="Reds")
         fig4.update_layout(**DARK_LAYOUT)
         fig4.update_layout(yaxis={"autorange": "reversed"}, height=250, coloraxis_showscale=False)
-        st.plotly_chart(fig4, use_container_width=True)
+        st.plotly_chart(fig4, use_container_width=True, key="top_sources_bar")
     else:
         st.info("Waiting for alerts.")
 
@@ -420,11 +628,75 @@ with tab_alerts:
                                   options=display.index, 
                                   format_func=lambda x: f"{display.loc[x, 'time']} | {display.loc[x, '_src_ip']} → {display.loc[x, '_dst_ip']}")
         if selected_ts is not None:
-            st.json(alerts_df.loc[selected_ts].to_dict())
+            alert = alerts_df.loc[selected_ts]
+            st.json(alert.to_dict())
+            
+            src_ip = alert.get("_src_ip")
+            if src_ip:
+                is_blocked = False
+                if redis_conn:
+                    is_blocked = redis_conn.sismember("nids:blocked:ips", src_ip)
+                
+                if not is_blocked:
+                    if st.button(f"🔴 BAN {src_ip}", type="primary"):
+                        send_firewall_command("block", src_ip)
+                else:
+                    st.success(f"IP {src_ip} is currently BLOCKED.")
     else:
         st.write("No alerts to inspect.")
 
-# == TAB 3: ANALYTICS & ML ==
+# == TAB 3: INCIDENTS ==
+with tab_incidents:
+    st.subheader("Correlation Engine: Active Attackers")
+    if has_alerts:
+        # Group by Source IP
+        incidents = alerts_df.copy()
+        # Convert severity to numeric for aggregation
+        sev_map = {"high": 3, "medium": 2, "low": 1}
+        incidents["sev_num"] = incidents["severity"].map(sev_map)
+        
+        grouped = incidents.groupby("_src_ip").agg({
+            "sev_num": "max",
+            "score": "max",
+            "signature_match": "nunique",
+            "_dst_ip": "nunique",
+            "_alerted_at": ["min", "max", "count"]
+        })
+        grouped.columns = ["max_sev", "max_score", "unique_sigs", "unique_targets", "first_seen", "last_seen", "total_alerts"]
+        grouped = grouped.reset_index().sort_values("max_sev", ascending=False)
+        
+        rev_sev_map = {3: "high", 2: "medium", 1: "low"}
+        
+        for idx, row in grouped.iterrows():
+            with st.container():
+                sc1, sc2, sc3, sc4 = st.columns([2, 1, 1, 2])
+                sev_label = rev_sev_map[row['max_sev']]
+                sc1.markdown(f"### {SEV_ICON[sev_label]} {row['_src_ip']}")
+                sc2.metric("Alerts", row['total_alerts'])
+                sc3.metric("Targets", row['unique_targets'])
+                
+                duration = row['last_seen'] - row['first_seen']
+                dur_str = fmt_uptime(duration) if duration > 0 else "Instant"
+                sc4.markdown(f"**Max Score:** `{row['max_score']:.3f}`  \n**Duration:** `{dur_str}`")
+                
+                st.markdown(f"*Targeted with {row['unique_sigs']} unique signature variations.*")
+                
+                src_ip = row['_src_ip']
+                is_blocked = False
+                if redis_conn:
+                    is_blocked = redis_conn.sismember("nids:blocked:ips", src_ip)
+                
+                if not is_blocked:
+                    if st.button(f"🔴 BAN ATTACKER: {src_ip}", key=f"ban_{src_ip}"):
+                        send_firewall_command("block", src_ip)
+                else:
+                    st.success(f"ENTITY {src_ip} PROVISIONALLY DROPPED")
+                
+                st.divider()
+    else:
+        st.info("No incidents detected yet.")
+
+# == TAB 4: ANALYTICS & ML ==
 with tab_analytics:
     col_score, col_perc = st.columns([3, 2])
     with col_score:
