@@ -104,6 +104,19 @@ def load_from_db(table: str, limit: int = 2000) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def load_incidents(limit: int = 100) -> pd.DataFrame:
+    db_path = Path("data/nids.db")
+    if not db_path.exists():
+        return pd.DataFrame()
+    try:
+        conn = sqlite3.connect(db_path)
+        df = pd.read_sql_query(f"SELECT * FROM incidents ORDER BY end_time DESC LIMIT {limit}", conn)
+        conn.close()
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
 def fmt_uptime(secs: float) -> str:
     h, rem = divmod(int(secs), 3600)
     m, s   = divmod(rem, 60)
@@ -381,6 +394,7 @@ sev_filter   = st.sidebar.multiselect("Severity Filter", ["high", "medium", "low
 # ── Data Loading (Initial) ────────────────────────────────────────────────────
 alerts_df = load_from_db("alerts", limit=history_lim)
 flows_df  = load_from_db("flows",  limit=history_lim)
+incidents_df = load_incidents(limit=100)
 
 # ── Advanced Sidebar Filters (Require data) ───────────────────────────────────
 st.sidebar.markdown("---")
@@ -647,54 +661,38 @@ with tab_alerts:
 
 # == TAB 3: INCIDENTS ==
 with tab_incidents:
-    st.subheader("Correlation Engine: Active Attackers")
-    if has_alerts:
-        # Group by Source IP
-        incidents = alerts_df.copy()
-        # Convert severity to numeric for aggregation
-        sev_map = {"high": 3, "medium": 2, "low": 1}
-        incidents["sev_num"] = incidents["severity"].map(sev_map)
-        
-        grouped = incidents.groupby("_src_ip").agg({
-            "sev_num": "max",
-            "score": "max",
-            "signature_match": "nunique",
-            "_dst_ip": "nunique",
-            "_alerted_at": ["min", "max", "count"]
-        })
-        grouped.columns = ["max_sev", "max_score", "unique_sigs", "unique_targets", "first_seen", "last_seen", "total_alerts"]
-        grouped = grouped.reset_index().sort_values("max_sev", ascending=False)
-        
-        rev_sev_map = {3: "high", 2: "medium", 1: "low"}
-        
-        for idx, row in grouped.iterrows():
+    st.subheader("Correlation Engine: Active Incidents")
+    if not incidents_df.empty:
+        # Grouping was done in-engine, we just show the records
+        for idx, row in incidents_df.iterrows():
             with st.container():
                 sc1, sc2, sc3, sc4 = st.columns([2, 1, 1, 2])
-                sev_label = rev_sev_map[row['max_sev']]
-                sc1.markdown(f"### {SEV_ICON[sev_label]} {row['_src_ip']}")
-                sc2.metric("Alerts", row['total_alerts'])
-                sc3.metric("Targets", row['unique_targets'])
+                sev_label = row['max_severity'].lower()
+                status_icon = "🟢" if row['status'] == 'active' else "📁"
                 
-                duration = row['last_seen'] - row['first_seen']
+                sc1.markdown(f"### {status_icon} {SEV_ICON.get(sev_label, '⚪')} {row['src_ip']}")
+                sc2.metric("Alerts", row['alert_count'])
+                sc2.caption(f"Status: {row['status'].capitalize()}")
+                
+                duration = row['end_time'] - row['start_time']
                 dur_str = fmt_uptime(duration) if duration > 0 else "Instant"
-                sc4.markdown(f"**Max Score:** `{row['max_score']:.3f}`  \n**Duration:** `{dur_str}`")
                 
-                st.markdown(f"*Targeted with {row['unique_sigs']} unique signature variations.*")
+                sc4.markdown(f"**Max Severity:** `{sev_label.upper()}`  \n**Duration:** `{dur_str}`")
                 
-                src_ip = row['_src_ip']
+                src_ip = row['src_ip']
                 is_blocked = False
                 if redis_conn:
                     is_blocked = redis_conn.sismember("nids:blocked:ips", src_ip)
                 
                 if not is_blocked:
-                    if st.button(f"🔴 BAN ATTACKER: {src_ip}", key=f"ban_{src_ip}"):
+                    if st.button(f"🔴 BAN ATTACKER: {src_ip}", key=f"ban_{src_ip}_{row['id']}"):
                         send_firewall_command("block", src_ip)
                 else:
                     st.success(f"ENTITY {src_ip} PROVISIONALLY DROPPED")
                 
                 st.divider()
     else:
-        st.info("No incidents detected yet.")
+        st.info("No incidents detected yet. The correlator groups alerts from the same IP into incidents.")
 
 # == TAB 4: ANALYTICS & ML ==
 with tab_analytics:

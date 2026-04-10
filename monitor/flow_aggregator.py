@@ -7,8 +7,9 @@ Computes statistical features per flow for ML input.
 
 import time
 import math
+import ipaddress
 import numpy as np
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 import json
 from loguru import logger
 from core.redis_client import get_redis_client
@@ -48,6 +49,7 @@ class Flow:
         self._dst_port: Optional[int] = None
         self._is_init_labeled: bool = False
         self._protocol: Optional[int] = None
+        self._direction: str = "uncertain"
 
     def _get_redis_key(self) -> str:
         # Generate a stable string key from the 5-tuple
@@ -110,6 +112,33 @@ class Flow:
         self.ack_flag_count += pkt.get("ack", 0)
         if self._protocol is None:
             self._protocol = pkt.get("protocol")
+        
+        # Calculate direction on first packet or when initiator is re-oriented
+        if self.packet_count == 1 or (is_syn_init and self._is_init_labeled):
+            self._direction = self._calculate_direction(pkt.get("home_nets", []))
+
+    def _calculate_direction(self, home_nets: List[str]) -> str:
+        """Determines flow direction based on HOME_NET configuration."""
+        if not home_nets or not self._src_ip or not self._dst_ip:
+            return "uncertain"
+            
+        try:
+            networks = [ipaddress.ip_network(net) for net in home_nets]
+            src_ip = ipaddress.ip_address(self._src_ip)
+            dst_ip = ipaddress.ip_address(self._dst_ip)
+            
+            src_internal = any(src_ip in net for net in networks)
+            dst_internal = any(dst_ip in net for net in networks)
+            
+            if src_internal and not dst_internal:
+                return "outbound"
+            if not src_internal and dst_internal:
+                return "inbound"
+            if src_internal and dst_internal:
+                return "internal"
+            return "external"
+        except Exception:
+            return "uncertain"
 
     def sync_to_redis(self, redis_client, pkt: dict):
         """Push atomic updates to Redis for distributed aggregation."""
@@ -142,7 +171,7 @@ class Flow:
             meta = {
                 "_src_ip": self._src_ip, "_dst_ip": self._dst_ip,
                 "_src_port": self._src_port, "_dst_port": self._dst_port,
-                "_protocol": self._protocol
+                "_protocol": self._protocol, "_direction": self._direction
             }
             pipe.hset(rky, mapping={k: str(v) for k, v in meta.items() if v is not None})
             
@@ -181,6 +210,7 @@ class Flow:
             self._src_port = int(data.get("_src_port")) if data.get("_src_port") else self._src_port
             self._dst_port = int(data.get("_dst_port")) if data.get("_dst_port") else self._dst_port
             self._protocol = int(data.get("_protocol")) if data.get("_protocol") else self._protocol
+            self._direction = data.get("_direction", self._direction)
         except Exception as e:
             logger.error(f"Flow: Redis load failed: {e}")
 
@@ -240,6 +270,7 @@ class Flow:
             "_src_port": self._src_port,
             "_dst_port": self._dst_port,
             "_timestamp": self.start_time,
+            "direction": self._direction,
         }
 
 
@@ -249,9 +280,10 @@ class FlowAggregator:
     Evicts expired flows and returns their feature vectors.
     """
 
-    def __init__(self, flow_timeout: int = 60, eviction_interval: float = 1.0):
+    def __init__(self, flow_timeout: int = 60, eviction_interval: float = 1.0, home_net: List[str] = None):
         self.timeout = flow_timeout
         self.eviction_interval = eviction_interval
+        self.home_net = home_net or []
         self._flows: Dict[tuple, Flow] = {}
         self._last_evict: float = time.time()
         self.redis = get_redis_client()
@@ -274,6 +306,8 @@ class FlowAggregator:
             self._flows[key] = Flow()
         
         flow = self._flows[key]
+        # Inject home_nets into packet temporarily so flow can calculate direction
+        pkt["home_nets"] = self.home_net
         flow.add_packet(pkt)
         
         if self.redis:

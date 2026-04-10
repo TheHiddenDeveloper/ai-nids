@@ -43,12 +43,13 @@ class FlowLogger:
         dst_ip = record.get("dst_ip") or record.get("_dst_ip") # sometimes the extractor maps it differently, fallback check
         dst_port = record.get("dst_port")
         score = record.get("score")
+        direction = record.get("direction")
         
         raw_json = _dumps(record)
         
         self.conn.execute(
-            "INSERT INTO flows (timestamp, src_ip, dst_ip, dst_port, score, raw_json) VALUES (?, ?, ?, ?, ?, ?)",
-            (timestamp, src_ip, dst_ip, dst_port, score, raw_json)
+            "INSERT INTO flows (timestamp, src_ip, dst_ip, dst_port, score, direction, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (timestamp, src_ip, dst_ip, dst_port, score, direction, raw_json)
         )
 
     def log_batch(self, records: list):
@@ -64,12 +65,13 @@ class FlowLogger:
             dst_ip = record.get("dst_ip") or record.get("_dst_ip")
             dst_port = record.get("dst_port")
             score = record.get("score")
+            direction = record.get("direction")
             raw_json = _dumps(record)
             
-            rows.append((timestamp, src_ip, dst_ip, dst_port, score, raw_json))
+            rows.append((timestamp, src_ip, dst_ip, dst_port, score, direction, raw_json))
             
         self.conn.executemany(
-            "INSERT INTO flows (timestamp, src_ip, dst_ip, dst_port, score, raw_json) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO flows (timestamp, src_ip, dst_ip, dst_port, score, direction, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
             rows
         )
 
@@ -93,12 +95,14 @@ class AlertLogger:
         label = alert.get("label")
         sig_match = alert.get("signature_match")
         suppression_note = alert.get("suppression_note")
+        direction = alert.get("direction")
+        incident_id = alert.get("incident_id")
         
         raw_json = _dumps(alert)
         
         self.conn.execute(
-            "INSERT INTO alerts (timestamp, severity, src_ip, src_port, dst_ip, dst_port, score, label, signature_match, suppression_note, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (timestamp, severity, src_ip, src_port, dst_ip, dst_port, score, label, sig_match, suppression_note, raw_json)
+            "INSERT INTO alerts (timestamp, severity, src_ip, src_port, dst_ip, dst_port, score, label, signature_match, suppression_note, direction, incident_id, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (timestamp, severity, src_ip, src_port, dst_ip, dst_port, score, label, sig_match, suppression_note, direction, incident_id, raw_json)
         )
         
         logger.warning(
