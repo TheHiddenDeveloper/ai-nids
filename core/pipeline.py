@@ -10,6 +10,7 @@ Run this in a background thread or directly from run_monitor.py.
 """
 
 import time
+import yaml
 import threading
 from pathlib import Path
 from typing import Optional
@@ -24,6 +25,7 @@ from signatures.checker import SignatureChecker
 from core.event_bus import EventBus
 from core.deduplicator import AlertDeduplicator
 from core.stats_tracker import StatsTracker
+from core.correlator import IncidentCorrelator
 
 
 class NIDSPipeline:
@@ -48,15 +50,18 @@ class NIDSPipeline:
         use_model:      bool = True,
         event_bus:      Optional[EventBus] = None,
         stats_tracker:  Optional[StatsTracker] = None,
+        home_net:       Optional[list] = None
     ):
         self.use_model      = use_model
         self.use_signatures = use_signatures
+        self.home_net       = home_net or []
 
         # Core processing components
-        self.aggregator  = FlowAggregator(flow_timeout=flow_timeout)
+        self.aggregator  = FlowAggregator(flow_timeout=flow_timeout, home_net=self.home_net)
         self.extractor   = FeatureExtractor()
         self.deduplicator = AlertDeduplicator(suppress_window_secs=dedup_window)
         self.sig_checker = SignatureChecker(watch=True) if use_signatures else None
+        self.correlator  = IncidentCorrelator(inactivity_window=180) # 3-minute window
 
         # AI inference (ensemble: RF + Autoencoder)
         self.engine = None
@@ -149,6 +154,7 @@ class NIDSPipeline:
                     "_src_port":  flow.get("_src_port"),
                     "_dst_port":  flow.get("_dst_port"),
                     "_timestamp": flow.get("_timestamp"),
+                    "direction":  flow.get("direction", "uncertain"),
                 })
                 # Inject flow features so sig_checker can inspect them
                 raw_results[-1].update({k: v for k, v in flow.items() if not k.startswith("_")})
@@ -168,6 +174,8 @@ class NIDSPipeline:
             if note:
                 alert["suppression_note"] = note
 
+            alert["incident_id"] = self.correlator.process_alert(alert)
+
             self.alert_logger.log_alert(alert)
             self.stats.record_alert(alert)
             self.bus.publish("alert", alert)
@@ -181,6 +189,14 @@ class NIDSPipeline:
             evicted = self.deduplicator.evict_expired()
             if evicted:
                 logger.debug(f"Maintenance: evicted {evicted} stale dedup keys")
+            
+            # Evict stale incidents
+            closed = self.correlator.evict_stale()
+            if closed:
+                logger.info(f"Maintenance: closed {len(closed)} stale incidents")
+                for cid in closed:
+                    # Optional: publish 'incident_closed' event if needed
+                    self.bus.publish("incident_update", {"id": cid, "status": "closed"})
 
     @property
     def active_flows(self) -> int:

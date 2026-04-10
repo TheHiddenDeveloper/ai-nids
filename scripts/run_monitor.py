@@ -19,6 +19,7 @@ import signal
 import argparse
 import os
 import psutil
+import yaml
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -86,6 +87,12 @@ def print_banner(args, pipeline: NIDSPipeline):
 def main():
     args = build_parser().parse_args()
     configure_logging(args.verbose)
+    
+    # Load config.yaml for network settings
+    config = {}
+    if Path("config.yaml").exists():
+        with open("config.yaml") as f:
+            config = yaml.safe_load(f)
 
     model_dir = Path(args.model_dir)
     bus   = EventBus()
@@ -101,6 +108,7 @@ def main():
         use_signatures = True,
         event_bus      = bus,
         stats_tracker  = stats,
+        home_net       = config.get("network", {}).get("home_net")
     )
 
     if not pipeline.start():

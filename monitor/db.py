@@ -30,6 +30,7 @@ def init_db():
                 dst_ip TEXT,
                 dst_port INTEGER,
                 score REAL,
+                direction TEXT,
                 raw_json TEXT
             )
         """)
@@ -51,6 +52,7 @@ def init_db():
                 label TEXT,
                 signature_match TEXT,
                 suppression_note TEXT,
+                direction TEXT,
                 raw_json TEXT
             )
         """)
@@ -58,6 +60,34 @@ def init_db():
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_alerts_timestamp ON alerts(timestamp);
         """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS incidents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                start_time REAL,
+                end_time REAL,
+                src_ip TEXT,
+                alert_count INTEGER DEFAULT 0,
+                max_severity TEXT,
+                status TEXT DEFAULT 'active',
+                raw_data TEXT
+            )
+        """)
+
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_incidents_src_ip ON incidents(src_ip);
+        """)
+
+        # Migration: Add direction column if it doesn't exist
+        columns_flows = [c[1] for c in conn.execute("PRAGMA table_info(flows)").fetchall()]
+        if "direction" not in columns_flows:
+            conn.execute("ALTER TABLE flows ADD COLUMN direction TEXT")
+        
+        columns_alerts = [c[1] for c in conn.execute("PRAGMA table_info(alerts)").fetchall()]
+        if "direction" not in columns_alerts:
+            conn.execute("ALTER TABLE alerts ADD COLUMN direction TEXT")
+        if "incident_id" not in columns_alerts:
+            conn.execute("ALTER TABLE alerts ADD COLUMN incident_id INTEGER")
 
 # Initialize schema on module import
 init_db()
@@ -69,6 +99,7 @@ def clear_db_data():
         with conn:
             conn.execute("DELETE FROM flows")
             conn.execute("DELETE FROM alerts")
+            conn.execute("DELETE FROM incidents")
             # Vacuum to reclaim space
             conn.execute("VACUUM")
         
