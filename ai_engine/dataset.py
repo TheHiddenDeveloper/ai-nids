@@ -23,9 +23,10 @@ CICIDS_COLUMN_MAP = {
     "Flow Duration": "duration",
     "Total Length of Fwd Packets": "src_bytes",
     "Total Length of Bwd Packets": "dst_bytes",
-    "Total Fwd Packets": "packet_count",
-    "Fwd Packet Length Mean": "avg_packet_len",
-    "Fwd Packet Length Std": "std_packet_len",
+    "Total Fwd Packets": "fwd_count",  # Temporary for sum
+    "Total Backward Packets": "bwd_count", # Temporary for sum
+    "Packet Length Mean": "avg_packet_len",
+    "Packet Length Std": "std_packet_len",
     "Flow Bytes/s": "flow_bytes_per_sec",
     "Flow Packets/s": "flow_packets_per_sec",
     "Fwd Packet Length Max": "fwd_packet_len_max",
@@ -64,35 +65,41 @@ def load_cicids2017(data_dir: str = "data/raw/cicids2017") -> pd.DataFrame:
     if not csv_files:
         raise FileNotFoundError(
             f"No CSV files found in {data_dir}.\n"
-            f"Download CICIDS2017 from https://www.unb.ca/cic/datasets/ids-2017.html\n"
-            f"and place the CSV files in {data_dir}/"
+            f"Run 'bash scripts/fetch_cicids.sh' or 'python scripts/fetch_cicids.py' first."
         )
 
-    logger.info(f"Loading {len(csv_files)} CSV file(s) from {data_dir}")
+    logger.info(f"Loading {len(csv_files)} research CSV file(s) from {data_dir}")
     dfs = []
     for f in csv_files:
         logger.info(f"  Reading {f.name}...")
-        df = pd.read_csv(f, low_memory=False)
+        # Research data is often encoded in latin1
+        df = pd.read_csv(f, low_memory=False, encoding="latin1")
         df.columns = df.columns.str.strip()
         dfs.append(df)
 
     combined = pd.concat(dfs, ignore_index=True)
-    logger.info(f"Raw dataset: {len(combined):,} rows, {len(combined.columns)} columns")
+    logger.info(f"Raw research dataset: {len(combined):,} rows")
 
     combined.rename(columns=CICIDS_COLUMN_MAP, inplace=True)
+
+    # Calculate total packet count if directional counts exist
+    if "fwd_count" in combined.columns and "bwd_count" in combined.columns:
+        combined["packet_count"] = combined["fwd_count"] + combined["bwd_count"]
 
     needed = FEATURE_COLS + ["label"]
     available = [c for c in needed if c in combined.columns]
     combined = combined[available].copy()
 
+    # Clean data (NaN/Inf)
     combined.replace([np.inf, -np.inf], np.nan, inplace=True)
     combined.dropna(inplace=True)
 
     combined["label"] = combined["label"].str.strip()
+    # Broad classification: anything not 'BENIGN' is an attack
     combined["is_attack"] = (combined["label"].str.upper() != "BENIGN").astype(int)
 
-    logger.info(f"Clean dataset: {len(combined):,} rows")
-    logger.info(f"Label distribution:\n{combined['label'].value_counts().to_string()}")
+    logger.info(f"Clean research dataset: {len(combined):,} rows")
+    logger.info(f"Attack samples: {combined['is_attack'].sum():,}")
 
     return combined
 

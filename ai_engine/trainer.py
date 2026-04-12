@@ -94,21 +94,23 @@ def train_autoencoder(
     n_features = X_train_s.shape[1]
 
     inputs = keras.Input(shape=(n_features,))
-    x = keras.layers.Dense(32, activation="relu")(inputs)
+    x = keras.layers.Dense(64, activation="relu")(inputs)
+    x = keras.layers.Dense(32, activation="relu")(x)
     x = keras.layers.Dense(16, activation="relu")(x)
-    x = keras.layers.Dense(8, activation="relu")(x)
+    x = keras.layers.Dense(8, activation="relu")(x) # Latent space
     x = keras.layers.Dense(16, activation="relu")(x)
     x = keras.layers.Dense(32, activation="relu")(x)
+    x = keras.layers.Dense(64, activation="relu")(x)
     outputs = keras.layers.Dense(n_features, activation="linear")(x)
 
     autoencoder = keras.Model(inputs, outputs)
     autoencoder.compile(optimizer="adam", loss="mse")
 
-    logger.info("Training Autoencoder on benign traffic only...")
+    logger.info(f"Training High-Precision Autoencoder (epochs={max(epochs, 100)})...")
     autoencoder.fit(
         X_train_s, X_train_s,
-        epochs=epochs,
-        batch_size=256,
+        epochs=max(epochs, 100),
+        batch_size=128,
         validation_split=0.1,
         verbose=1,
     )

@@ -97,12 +97,16 @@ class AlertLogger:
         suppression_note = alert.get("suppression_note")
         direction = alert.get("direction")
         incident_id = alert.get("incident_id")
+        country = alert.get("country")
+        city = alert.get("city")
+        asn = alert.get("asn")
+        threat_level = alert.get("threat_level")
         
         raw_json = _dumps(alert)
         
         self.conn.execute(
-            "INSERT INTO alerts (timestamp, severity, src_ip, src_port, dst_ip, dst_port, score, label, signature_match, suppression_note, direction, incident_id, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (timestamp, severity, src_ip, src_port, dst_ip, dst_port, score, label, sig_match, suppression_note, direction, incident_id, raw_json)
+            "INSERT INTO alerts (timestamp, severity, src_ip, src_port, dst_ip, dst_port, score, label, signature_match, suppression_note, direction, incident_id, country, city, asn, threat_level, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (timestamp, severity, src_ip, src_port, dst_ip, dst_port, score, label, sig_match, suppression_note, direction, incident_id, country, city, asn, threat_level, raw_json)
         )
         
         logger.warning(

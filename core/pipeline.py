@@ -26,6 +26,7 @@ from core.event_bus import EventBus
 from core.deduplicator import AlertDeduplicator
 from core.stats_tracker import StatsTracker
 from core.correlator import IncidentCorrelator
+from core.threat_intel import ThreatIntelManager
 
 
 class NIDSPipeline:
@@ -62,6 +63,7 @@ class NIDSPipeline:
         self.deduplicator = AlertDeduplicator(suppress_window_secs=dedup_window)
         self.sig_checker = SignatureChecker(watch=True) if use_signatures else None
         self.correlator  = IncidentCorrelator(inactivity_window=180) # 3-minute window
+        self.intel       = ThreatIntelManager()
 
         # AI inference (ensemble: RF + Autoencoder)
         self.engine = None
@@ -174,7 +176,19 @@ class NIDSPipeline:
             if note:
                 alert["suppression_note"] = note
 
-            alert["incident_id"] = self.correlator.process_alert(alert)
+            # Threat Intel Enrichment
+            intel = self.intel.get_enrichment(alert.get("_src_ip"))
+            if intel:
+                alert.update({
+                    "country":      intel.get("country"),
+                    "city":         intel.get("city"),
+                    "asn":          intel.get("asn"),
+                    "threat_level": intel.get("threat_level"),
+                    "is_malicious": intel.get("is_malicious"),
+                    "isp":          intel.get("isp")
+                })
+
+            alert["incident_id"] = self.correlator.process_alert(alert, intel=intel)
 
             self.alert_logger.log_alert(alert)
             self.stats.record_alert(alert)
