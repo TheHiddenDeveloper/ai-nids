@@ -4,5 +4,5 @@
 🔴,08:59:23,high,10.129.239.240,42330,10.128.128.128,53,0,BENIGN,"C2 beacon (tiny periodic flow): Very few packets, very short duration. Pattern matches known C2 check-in behaviour where malware sends a heartbeat every N seconds."
 🔴,08:57:39,high,10.129.239.240,5353,224.0.0.251,5353,0,BENIGN,NULL scan: Flow with zero TCP flags set. No legitimate traffic uses null flags — used by scanners to identify OS type and open ports.
 🔴,08:57:39,high,10.129.239.240,38234,10.128.128.128,53,0,BENIGN,"C2 beacon (tiny periodic flow): Very few packets, very short duration. Pattern matches known C2 check-in behaviour where malware sends a heartbeat every N seconds."
-🔴,08:55:57,high,10.129.239.240,47312,10.128.128.128,53,0,BENIGN,"C2 beacon (tiny periodic flow): Very few packets, very short duration. Pattern matches known C2 check-in behaviour where malware sends a heartbeat every N seconds."
+🔴,08:55:57,high,10.129.239.240,47312,10.128.128.128,53,0,BENcIGN,"C2 beacon (tiny periodic flow): Very few packets, very short duration. Pattern matches known C2 check-in behaviour where malware sends a heartbeat every N seconds."
 🔴,08:49:28,high,10.129.239.240,40386,10.128.128.128,53,0,BENIGN,"C2 beacon (tiny periodic flow): Very few packets, very short duration. Pattern matches known C2 check-in behaviour where malware sends a heartbeat every N seconds."
