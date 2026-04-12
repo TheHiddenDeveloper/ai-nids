@@ -39,8 +39,8 @@ class EnsembleInferenceEngine:
     def __init__(
         self,
         model_dir:  str   = "data/models",
-        rf_weight:  float = 0.65,
-        ae_weight:  float = 0.35,
+        rf_weight:  float = 0.50,
+        ae_weight:  float = 0.50,
     ):
         self.model_dir  = Path(model_dir)
         self.rf_weight  = rf_weight

@@ -104,6 +104,15 @@ def load_from_db(table: str, limit: int = 2000) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def get_flag_emoji(country_code: str) -> str:
+    """Converts ISO country code to Emoji flag."""
+    if not country_code or len(country_code) != 2:
+        return ""
+    # Offset for regional indicator symbols
+    OFFSET = 127397
+    return chr(ord(country_code[0].upper()) + OFFSET) + chr(ord(country_code[1].upper()) + OFFSET)
+
+
 def load_incidents(limit: int = 100) -> pd.DataFrame:
     db_path = Path("data/nids.db")
     if not db_path.exists():
@@ -178,7 +187,14 @@ def draw_alert_ticker(df):
     items = []
     for _, row in recent.iterrows():
         sev = row.get("severity", "low").upper()
-        msg = row.get("signature_match") or f"Anomaly: {row.get('score', 0):.3f}"
+        
+        # Robustly handle missing messages (which Pandas reads as NaN floats)
+        sig_match = row.get("signature_match")
+        if pd.isna(sig_match) or not str(sig_match).strip() or str(sig_match) == "nan":
+            msg = f"Anomaly: {row.get('score', 0):.3f}"
+        else:
+            msg = str(sig_match)
+            
         items.append(f"<span style='color:{SEV_COLOR.get(row.get('severity'), '#888')}; font-weight:bold;'>[{sev}]</span> {msg[:50]}...")
     
     ticker_html = f"""
@@ -236,19 +252,28 @@ def draw_threat_map(df):
     top_ips = df["_src_ip"].value_counts().head(30).index.tolist()
     
     map_data = []
-    for ip in top_ips:
-        loc = geo_lookup.get_location(ip)
-        if loc:
-            ip_alerts = df[df["_src_ip"] == ip]
-            max_sev = ip_alerts["severity"].map({"high": 3, "medium": 2, "low": 1}).max()
+    for _, row in df.iterrows():
+        ip = row.get("_src_ip")
+        if not ip: continue
+        
+        # Use database enrichment if available, fallback to live lookup
+        country = row.get("country")
+        lat, lon = row.get("lat"), row.get("lon")
+        
+        if not lat or not lon:
+            loc = geo_lookup.get_location(ip)
+            if loc:
+                lat, lon, country = loc["lat"], loc["lon"], loc["country"]
+        
+        if lat and lon:
             map_data.append({
-                "lat": loc["lat"],
-                "lon": loc["lon"],
+                "lat": lat,
+                "lon": lon,
                 "IP": ip,
-                "Location": f"{loc['city']}, {loc['country']}",
-                "Alerts": len(ip_alerts),
-                "Severity": max_sev,
-                "ISP": loc.get("isp", "Unknown")
+                "Location": country or "Unknown",
+                "Alerts": 1, # Aggregate later or use pre-aggregated
+                "Severity": row.get("severity", "low"),
+                "ISP": row.get("isp", "Unknown")
             })
     
     if not map_data:
@@ -413,7 +438,20 @@ st.sidebar.markdown("---")
 # Health Section
 redis_conn = get_redis_client()
 redis_status = "Connected ✅" if redis_conn else "Disconnected ❌"
-st.sidebar.markdown(f"**Engine Health**  \n`Redis:` {redis_status}")
+
+# AI Status
+rf_exists = Path("data/models/nids_model.joblib").exists()
+ae_exists = Path("data/models/autoencoder.keras").exists()
+
+ai_status = "Inactive ⚪"
+if rf_exists and ae_exists:
+    ai_status = "High-Precision Active 🧠✨"
+elif rf_exists:
+    ai_status = "RF Only 🛡️"
+elif ae_exists:
+    ai_status = "AE Only 🔍"
+
+st.sidebar.markdown(f"**Engine Health**  \n`Redis:` {redis_status}  \n`AI Engine:` {ai_status}")
 
 with st.sidebar.expander("🛠️ System Maintenance"):
     st.warning("Destructive Actions")
@@ -643,6 +681,19 @@ with tab_alerts:
                                   format_func=lambda x: f"{display.loc[x, 'time']} | {display.loc[x, '_src_ip']} → {display.loc[x, '_dst_ip']}")
         if selected_ts is not None:
             alert = alerts_df.loc[selected_ts]
+            
+            # AI Details Enrichment
+            try:
+                raw_data = json.loads(alert.get("raw_json", "{}"))
+                if "score" in raw_data:
+                    st.markdown("### 🧠 AI Analysis")
+                    a1, a2, a3 = st.columns(3)
+                    a1.metric("Ensemble Score", f"{raw_data.get('score', 0):.2%}")
+                    a2.metric("RF Confidence", f"{raw_data.get('rf_score', 0):.2%}")
+                    a3.metric("Anomaly Score", f"{raw_data.get('ae_score', 0):.2%}")
+            except:
+                pass
+
             st.json(alert.to_dict())
             
             src_ip = alert.get("_src_ip")
@@ -663,14 +714,23 @@ with tab_alerts:
 with tab_incidents:
     st.subheader("Correlation Engine: Active Incidents")
     if not incidents_df.empty:
-        # Grouping was done in-engine, we just show the records
         for idx, row in incidents_df.iterrows():
             with st.container():
                 sc1, sc2, sc3, sc4 = st.columns([2, 1, 1, 2])
                 sev_label = row['max_severity'].lower()
                 status_icon = "🟢" if row['status'] == 'active' else "📁"
                 
-                sc1.markdown(f"### {status_icon} {SEV_ICON.get(sev_label, '⚪')} {row['src_ip']}")
+                # Enrichment
+                country = row.get("country", "Unknown")
+                city = row.get("city", "")
+                loc_str = f"{city}, {country}" if city else country
+                
+                # Flag Emojis/Badges
+                malicious_badge = " 🔴 [MALICIOUS]" if row.get('threat_level') == 'high' else ""
+                
+                sc1.markdown(f"### {status_icon} {SEV_ICON.get(sev_label, '⚪')} {row['src_ip']}{malicious_badge}")
+                sc1.caption(f"📍 {loc_str}")
+                
                 sc2.metric("Alerts", row['alert_count'])
                 sc2.caption(f"Status: {row['status'].capitalize()}")
                 
@@ -678,6 +738,8 @@ with tab_incidents:
                 dur_str = fmt_uptime(duration) if duration > 0 else "Instant"
                 
                 sc4.markdown(f"**Max Severity:** `{sev_label.upper()}`  \n**Duration:** `{dur_str}`")
+                if row.get('asn'):
+                    sc4.caption(f"Organization: {row['asn']}")
                 
                 src_ip = row['src_ip']
                 is_blocked = False

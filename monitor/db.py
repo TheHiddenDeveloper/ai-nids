@@ -53,6 +53,11 @@ def init_db():
                 signature_match TEXT,
                 suppression_note TEXT,
                 direction TEXT,
+                incident_id INTEGER,
+                country TEXT,
+                city TEXT,
+                asn TEXT,
+                threat_level TEXT,
                 raw_json TEXT
             )
         """)
@@ -70,6 +75,10 @@ def init_db():
                 alert_count INTEGER DEFAULT 0,
                 max_severity TEXT,
                 status TEXT DEFAULT 'active',
+                country TEXT,
+                city TEXT,
+                asn TEXT,
+                threat_level TEXT,
                 raw_data TEXT
             )
         """)
@@ -88,6 +97,18 @@ def init_db():
             conn.execute("ALTER TABLE alerts ADD COLUMN direction TEXT")
         if "incident_id" not in columns_alerts:
             conn.execute("ALTER TABLE alerts ADD COLUMN incident_id INTEGER")
+        
+        # Threat Intel columns for alerts
+        new_cols = ["country", "city", "asn", "threat_level"]
+        for col in new_cols:
+            if col not in columns_alerts:
+                conn.execute(f"ALTER TABLE alerts ADD COLUMN {col} TEXT")
+                
+        # Threat Intel columns for incidents
+        columns_incidents = [c[1] for c in conn.execute("PRAGMA table_info(incidents)").fetchall()]
+        for col in new_cols:
+            if col not in columns_incidents:
+                conn.execute(f"ALTER TABLE incidents ADD COLUMN {col} TEXT")
 
 # Initialize schema on module import
 init_db()

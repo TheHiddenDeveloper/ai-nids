@@ -21,6 +21,12 @@ class Incident:
         self.severity = severity
         self.alert_count = 1
         self.is_active = True
+        # Enrichment fields
+        self.country = None
+        self.countryCode = None
+        self.city = None
+        self.asn = None
+        self.threat_level = None
 
 class IncidentCorrelator:
     """
@@ -53,7 +59,7 @@ class IncidentCorrelator:
         except Exception as e:
             logger.error(f"Correlator: Failed to resume active incidents: {e}")
 
-    def process_alert(self, alert: dict, now: float = None) -> int:
+    def process_alert(self, alert: dict, intel: dict = None, now: float = None) -> int:
         """
         Groups an alert into an incident and returns the incident_id.
         """
@@ -68,6 +74,14 @@ class IncidentCorrelator:
             incident.last_seen = now
             incident.alert_count += 1
             
+            # Sync intel if not already set or changed
+            if intel:
+                incident.country = intel.get("country")
+                incident.countryCode = intel.get("countryCode")
+                incident.city = intel.get("city")
+                incident.asn = intel.get("asn")
+                incident.threat_level = intel.get("threat_level")
+
             # Escalate severity if needed
             sev_map = {"low": 0, "medium": 1, "high": 2}
             if sev_map.get(severity, 0) > sev_map.get(incident.severity, 0):
@@ -77,17 +91,28 @@ class IncidentCorrelator:
             return incident.id
         else:
             # Create new incident
-            iid = self._create_incident_db(src_ip, now, severity)
+            iid = self._create_incident_db(src_ip, now, severity, intel)
             incident = Incident(iid, src_ip, now, severity)
+            if intel:
+                incident.country = intel.get("country")
+                incident.countryCode = intel.get("countryCode")
+                incident.city = intel.get("city")
+                incident.asn = intel.get("asn")
+                incident.threat_level = intel.get("threat_level")
             self.active_incidents[src_ip] = incident
             return iid
 
-    def _create_incident_db(self, src_ip: str, start_time: float, severity: str) -> int:
+    def _create_incident_db(self, src_ip: str, start_time: float, severity: str, intel: dict = None) -> int:
         """Inserts a new incident into the DB and returns its ID."""
+        country = intel.get("country") if intel else None
+        city = intel.get("city") if intel else None
+        asn = intel.get("asn") if intel else None
+        threat_level = intel.get("threat_level") if intel else None
+
         try:
             cursor = self.conn.execute(
-                "INSERT INTO incidents (start_time, end_time, src_ip, alert_count, max_severity, status) VALUES (?, ?, ?, ?, ?, ?)",
-                (start_time, start_time, src_ip, 1, severity, "active")
+                "INSERT INTO incidents (start_time, end_time, src_ip, alert_count, max_severity, status, country, city, asn, threat_level) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (start_time, start_time, src_ip, 1, severity, "active", country, city, asn, threat_level)
             )
             return cursor.lastrowid
         except Exception as e:
@@ -98,8 +123,8 @@ class IncidentCorrelator:
         """Persists incident updates to the DB."""
         try:
             self.conn.execute(
-                "UPDATE incidents SET end_time = ?, alert_count = ?, max_severity = ? WHERE id = ?",
-                (inc.last_seen, inc.alert_count, inc.severity, inc.id)
+                "UPDATE incidents SET end_time = ?, alert_count = ?, max_severity = ?, country = ?, city = ?, asn = ?, threat_level = ? WHERE id = ?",
+                (inc.last_seen, inc.alert_count, inc.severity, inc.country, inc.city, inc.asn, inc.threat_level, inc.id)
             )
         except Exception as e:
             logger.error(f"Correlator: DB update failed: {e}")
