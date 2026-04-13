@@ -84,7 +84,10 @@ The monitor layer handles all packet-level concerns:
 
 ## 4. Dataset
 
-**CICIDS2017** (Canadian Institute for Cybersecurity Intrusion Detection Evaluation Dataset 2017) was generated over five working days in July 2017 by simulating both normal user behaviour and a comprehensive set of modern attacks on a controlled network.
+**CICIDS2017** — Canadian Institute for Cybersecurity Intrusion Detection Evaluation Dataset 2017.  
+2,830,743 labelled network flows across 14 categories including DoS, DDoS, Brute Force, Web Attacks, Infiltration, Bot, and Port Scan traffic.
+
+This dataset was historically accessed via the UNB `.zip` distribution. It is now completely integrated into this pipeline via an automated Hugging Face API script (`scripts/fetch_cicids.py`), natively downloading specific high-fidelity `.csv` slices to cleanly seed the Zero-Day models without demanding manual zip extractions. network.
 
 ### Dataset Statistics
 
@@ -272,16 +275,13 @@ A minimum alert count threshold (default 50) prevents retraining on insufficient
 
 ## 9. Dashboard
 
-The Streamlit dashboard (`dashboard/app.py`) auto-refreshes every 3 seconds by reading the JSONL log files directly. It presents 8 panels:
+The Streamlit dashboard (`dashboard/app.py`) serves as the central command interface. It was recently refactored into a highly modular, component-driven **Single-Page Application** using native Streamlit Tabs and Google Material Symbols for a premium UI. It connects directly to the underlying `nids.db` architecture and Redis backend. It presents 5 robust Tabs:
 
-1. **KPI row** — total flows, total alerts, high severity count, attack rate, session span
-2. **Alert timeline** — 30-second-bin area chart of alert volume over time
-3. **Severity breakdown** — donut chart of low/medium/high distribution
-4. **Alert table** — last 50 alerts with time, severity, IPs, ports, score, and dedup notes
-5. **ML score distribution** — histogram of all scored flows with threshold markers
-6. **Top alert sources** — horizontal bar chart of most active attacker IPs
-7. **Score percentiles** — p50/p75/p90/p95/p99 bar chart
-8. **Signature rule hits** — horizontal bar chart of rule fire counts
+1. **Overview** — Executive summary containing a KPI row, alerting timeline, Geographical Threat Map, Network Traffic Flow Sankey diagram, and severity break-downs.
+2. **Alerts Explorer** — In-depth log data frame with specific signature hits, anomalous scores, and an Alert Object Inspector providing 1-click Firewall Banning logic.
+3. **Active Incidents** — Visualization of the Correlation Engine wrapping alerts into active geographical malicious incidents.
+4. **Analytics & ML** — Advanced perspective on the probability distributions, ML score percentiles, and Port Vulnerability targeting.
+5. **Settings** — Control panel handling Redis Engine Health polling, live Blocklist management with un-banning execution, and Database maintenance via total state wiping.
 
 ---
 
