@@ -86,13 +86,13 @@ source ai-venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Download CICIDS2017
+### 2. Auto-Download CICIDS2017 Dataset
 
-Download **MachineLearningCSV.zip** from https://www.unb.ca/cic/datasets/ids-2017.html  
-Extract the CSV files into `data/raw/cicids2017/`:
+We now use an automated ingestion script to fetch authentic high-fidelity subsets natively from HuggingFace to cleanly seed the zero-day models:
 
 ```bash
-unzip MachineLearningCSV.zip -d data/raw/cicids2017/
+# Auto-download the dataset directly into data/raw/cicids2017/
+python scripts/fetch_cicids.py
 ```
 
 ### 3. Train the model

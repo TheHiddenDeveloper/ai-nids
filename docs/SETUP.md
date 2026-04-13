@@ -21,23 +21,16 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## 3. Download the CICIDS2017 Dataset
+## 3. Auto-Download the CICIDS2017 Dataset
 
-1. Visit: https://www.unb.ca/cic/datasets/ids-2017.html
-2. Download the **CSV** files (not the pcap files — CSVs are pre-processed flows)
-3. Place them in `data/raw/cicids2017/`
+We provide an automated script to fetch high-fidelity subsets natively from HuggingFace. This replaces the old manual zip extraction process.
 
-Expected file structure:
-```
-data/raw/cicids2017/
-├── Monday-WorkingHours.pcap_ISCX.csv
-├── Tuesday-WorkingHours.pcap_ISCX.csv
-├── Wednesday-workingHours.pcap_ISCX.csv
-├── Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv
-├── Thursday-WorkingHours-Afternoon-Infilteration.pcap_ISCX.csv
-├── Friday-WorkingHours-Morning.pcap_ISCX.csv
-├── Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv
-└── Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv
+```bash
+# Ensure huggingface_hub is installed
+pip install huggingface_hub pandas
+
+# Auto-download the dataset directly into data/raw/cicids2017/
+python scripts/fetch_cicids.py
 ```
 
 > **Tip:** You can start with just one or two CSV files to verify the pipeline
