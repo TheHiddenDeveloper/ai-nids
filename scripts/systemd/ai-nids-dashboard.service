@@ -7,8 +7,8 @@ Type=simple
 User={{USER}}
 WorkingDirectory={{PROJECT_ROOT}}
 
-# Explicitly bind Streamlit to correct host/port if necessary
-ExecStart="{{PROJECT_ROOT}}/ai-venv/bin/streamlit" run dashboard/app.py --server.port 8501 --server.address 127.0.0.1
+# Explicitly bind FastAPI uvicorn router
+ExecStart="{{PROJECT_ROOT}}/ai-venv/bin/uvicorn" api.main:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=5
 
