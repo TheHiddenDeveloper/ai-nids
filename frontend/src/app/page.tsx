@@ -2,13 +2,7 @@
 
 import { useState } from "react";
 import useSWR from "swr";
-import {
-  ShieldAlert,
-  Activity,
-  BarChart3,
-  Settings as SettingsIcon,
-  Globe2,
-} from "lucide-react";
+import { ShieldAlert, Activity, BarChart3, Settings as SettingsIcon, Globe2, ActivitySquare, MonitorPlay } from "lucide-react";
 import { OverviewTab } from "./components/OverviewTab";
 import { AlertsTab } from "./components/AlertsTab";
 import { IncidentsTab } from "./components/IncidentsTab";
@@ -20,16 +14,18 @@ const fetcher = (url: string) => fetch(url).then((res) => res.json());
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState("overview");
 
+  // Global Sidebar States
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [historyLim, setHistoryLim] = useState(2000);
+  const [sevFilter, setSevFilter] = useState(["high", "medium", "low"]);
+
   // Global Polling API
-  const { data: kpis } = useSWR("http://localhost:8000/api/kpis", fetcher, {
-    refreshInterval: 3000,
-  });
-  const { data: alerts } = useSWR("http://localhost:8000/api/alerts?limit=1000", fetcher, {
-    refreshInterval: 3000,
-  });
-  const { data: flows } = useSWR("http://localhost:8000/api/flows?limit=1500", fetcher, {
-    refreshInterval: 5000,
-  });
+  const { data: kpis } = useSWR("http://localhost:8000/api/kpis", fetcher, { refreshInterval: autoRefresh ? 3000 : 0 });
+  const { data: alertsRaw } = useSWR(`http://localhost:8000/api/alerts?limit=${historyLim}`, fetcher, { refreshInterval: autoRefresh ? 3000 : 0 });
+  const { data: flows } = useSWR("http://localhost:8000/api/flows?limit=1500", fetcher, { refreshInterval: autoRefresh ? 5000 : 0 });
+
+  // Apply visual filtering
+  const alerts = alertsRaw?.filter((a: any) => sevFilter.includes(a.severity)) || [];
 
   const tabs = [
     { id: "overview", label: "Overview", icon: Activity },
@@ -40,44 +36,48 @@ export default function Dashboard() {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-50 font-sans selection:bg-emerald-500/30">
-      {/* Top Navigation */}
-      <header className="border-b border-white/5 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 w-full h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="bg-emerald-500/10 p-2 rounded-lg border border-emerald-500/20">
-              <ShieldAlert className="w-5 h-5 text-emerald-400" />
-            </div>
-            <h1 className="text-xl font-bold tracking-tight bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">
-              AI-NIDS Central
-            </h1>
-          </div>
-
-          <nav className="flex gap-1 bg-slate-900 p-1 rounded-xl border border-white/5">
-            {tabs.map((tab) => {
-              const Icon = tab.icon;
-              const isActive = activeTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                    isActive
-                      ? "bg-slate-800 text-emerald-400 shadow-sm border border-white/5"
-                      : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-                  }`}
-                >
-                  <Icon className="w-4 h-4" />
-                  {tab.label}
-                </button>
-              );
-            })}
-          </nav>
+    <div className="min-h-screen bg-slate-950 text-slate-50 font-sans selection:bg-emerald-500/30 flex">
+      {/* Dynamic Sidebar Setup */}
+      <aside className="w-72 bg-slate-900 border-r border-white/5 flex flex-col justify-between sticky top-0 h-screen">
+        <div>
+           <div className="h-16 flex items-center px-6 border-b border-white/5 gap-3">
+             <div className="bg-emerald-500/10 p-2 rounded-lg border border-emerald-500/20">
+               <ShieldAlert className="w-5 h-5 text-emerald-400" />
+             </div>
+             <h1 className="text-xl font-bold tracking-tight bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">AI-NIDS</h1>
+           </div>
+           
+           <nav className="p-4 space-y-2">
+             {tabs.map((tab) => {
+               const Icon = tab.icon;
+               const isActive = activeTab === tab.id;
+               return (
+                 <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${isActive ? "bg-slate-800 text-emerald-400 shadow-sm border border-emerald-500/20" : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/30"}`}>
+                   <Icon className="w-5 h-5" />
+                   {tab.label}
+                 </button>
+               );
+             })}
+           </nav>
         </div>
-      </header>
 
-      {/* Main Content Area */}
-      <main className="max-w-7xl mx-auto px-4 py-8">
+        <div className="p-4 mb-4">
+           <div className="bg-slate-950 p-5 rounded-2xl border border-white/5">
+             <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Master Controls</h3>
+             <label className="flex items-center justify-between text-sm text-slate-300 cursor-pointer mb-4">
+               Live Mapping
+               <input type="checkbox" className="accent-emerald-500 w-4 h-4 cursor-pointer" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)}/>
+             </label>
+             <label className="flex flex-col gap-2 text-sm text-slate-300">
+               Log Log History: <span className="font-mono text-emerald-400">{historyLim} flows</span>
+               <input type="range" className="accent-emerald-500 w-full" min="500" max="5000" step="500" value={historyLim} onChange={(e) => setHistoryLim(Number(e.target.value))}/>
+             </label>
+           </div>
+        </div>
+      </aside>
+
+      {/* Main Panel Content Segment */}
+      <main className="flex-1 w-full max-w-7xl mx-auto px-8 py-8 h-screen overflow-y-auto">
         {activeTab === "overview" && <OverviewTab kpis={kpis} flows={flows} alerts={alerts} />}
         {activeTab === "alerts" && <AlertsTab alerts={alerts} />}
         {activeTab === "incidents" && <IncidentsTab />}
