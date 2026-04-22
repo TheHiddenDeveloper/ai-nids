@@ -30,8 +30,14 @@ def load_from_db(table: str, limit: int = 2000) -> list:
         if not rows:
             return []
             
-        # Parse JSON and reverse to restore chronological time-series order
-        records = [json.loads(row[0]) for row in reversed(rows)]
+        # Parse JSON and clean non-compliant Pandas Infinity/NaN outputs
+        records = []
+        for row in reversed(rows):
+            clean_json = row[0].replace('NaN', 'null').replace('Infinity', 'null').replace('-Infinity', 'null')
+            try:
+                records.append(json.loads(clean_json))
+            except json.JSONDecodeError:
+                pass
         return records
     except Exception as e:
         logger.error(f"Error loading {table}: {e}")

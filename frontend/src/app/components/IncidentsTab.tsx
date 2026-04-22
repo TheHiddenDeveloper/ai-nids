@@ -1,16 +1,55 @@
+"use client";
+import { ScatterChart, Scatter, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import useSWR from 'swr';
+const fetcher = (url: string) => fetch(url).then(res => res.json());
+
 export function IncidentsTab() {
+  const { data: alerts } = useSWR("http://localhost:8000/api/alerts?limit=500", fetcher);
+  
+  // Transform alerts with valid lat/lon into visual data points
+  const geoData = (alerts || [])
+    .filter((a: any) => a._src_ip_lat && a._src_ip_lon)
+    .map((a: any) => ({
+      x: a._src_ip_lon,
+      y: a._src_ip_lat,
+      z: a.score * 100, // Z represents size of bubble
+      ip: a._src_ip,
+      severity: a.severity
+    }));
+
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div className="bg-slate-900 border border-white/5 rounded-2xl p-6 h-[600px] flex flex-col items-center justify-center text-center">
-        <div className="w-16 h-16 bg-emerald-500/10 rounded-full flex items-center justify-center mb-4 border border-emerald-500/20">
-          <svg className="w-8 h-8 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-        </div>
-        <h2 className="text-xl font-bold text-white mb-2">Active Incidents Correlation Engine</h2>
-        <p className="text-slate-400 max-w-md">
-          The geographical correlation mapping visualizer will be attached here pulling from the /api/incidents endpoint.
-        </p>
+      <div className="bg-slate-900 border border-white/5 rounded-2xl p-6 h-[600px] flex flex-col items-center justify-center">
+        <h2 className="text-xl font-bold text-white mb-2 w-full text-left">Geo-IP Correlation Matrix</h2>
+        <p className="text-slate-400 mb-6 w-full text-left text-sm">Visualizing incident origins dynamically mapped against longitudinal vectors.</p>
+        
+        <ResponsiveContainer width="100%" height="100%">
+          <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+            <XAxis type="number" dataKey="x" domain={[-180, 180]} hide />
+            <YAxis type="number" dataKey="y" domain={[-90, 90]} hide />
+            <Tooltip 
+              cursor={{ strokeDasharray: '3 3' }}
+              content={({ active, payload }) => {
+                if (active && payload && payload.length) {
+                  const data = payload[0].payload;
+                  return (
+                     <div className="bg-slate-950 border border-white/10 p-3 rounded-lg shadow-xl">
+                        <p className="font-mono text-emerald-400 text-sm mb-1">{data.ip}</p>
+                        <p className="text-xs text-slate-300">Lon: {data.x.toFixed(2)} | Lat: {data.y.toFixed(2)}</p>
+                        <p className="text-xs text-rose-400 mt-1 uppercase font-bold">{data.severity}</p>
+                     </div>
+                  );
+                }
+                return null;
+              }}
+            />
+            <Scatter name="Attack Origins" data={geoData} opacity={0.6}>
+              {geoData.map((entry: any, index: number) => (
+                <Cell key={`cell-${index}`} fill={entry.severity === 'high' ? '#f43f5e' : entry.severity === 'medium' ? '#f59e0b' : '#3b82f6'} />
+              ))}
+            </Scatter>
+          </ScatterChart>
+        </ResponsiveContainer>
       </div>
     </div>
   );
