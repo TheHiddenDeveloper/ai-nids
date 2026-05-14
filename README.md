@@ -10,6 +10,9 @@
 
 A production-grade, Python-based NIDS that combines a supervised **Random Forest** classifier, an unsupervised **Autoencoder** anomaly detector, and a hot-reloadable **YAML signature engine** into a single real-time detection pipeline.
 
+> [!IMPORTANT]
+> **New to AI-NIDS?** Start with the [**Master Guide (GUIDE.md)**](docs/GUIDE.md) for full installation, architecture deep-dives, and operating instructions.
+
 ---
 
 ## Key Features
@@ -75,84 +78,7 @@ Live network traffic  ──or──  pcap replay
 
 ---
 
-## Quickstart
-
-### 1. Install
-
-```bash
-# Clone / extract project
-cd ai_nids/
-
-# Create virtual environment
-python3 -m venv ai-venv
-source ai-venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-### 2. Auto-Download CICIDS2017 Dataset
-
-We now use an automated ingestion script to fetch authentic high-fidelity subsets natively from HuggingFace to cleanly seed the zero-day models:
-
-```bash
-# Auto-download the dataset directly into data/raw/cicids2017/
-python scripts/fetch_cicids.py
-```
-
-### 3. Train the model
-
-```bash
-# Random Forest only (fast — ~15 min on full dataset)
-python scripts/train.py --model rf
-
-# Both RF + Autoencoder (recommended for full ensemble)
-python scripts/train.py --model both
-```
-
-Evaluation plots are saved to `data/models/`.
-
-### 4. Demo mode (no root needed)
-
-Generate a synthetic attack pcap and run the full pipeline against it:
-
-```bash
-./ai-venv/bin/python scripts/demo.py
-```
-
-This generates attack traffic, runs detection, and shows a live terminal report. No root, no live interface needed.
-
-### 5. Live monitoring
-
-```bash
-# Find your interface
-ip a
-
-# Run monitor (requires root for raw socket capture)
-# Use the explicit path to the virtual environment python to ensure dependencies are loaded
-sudo ./ai-venv/bin/python scripts/run_monitor.py --interface eth0
-```
-
-
-### 6. Dashboard (Next.js)
-
-```bash
-# In a separate terminal
-cd frontend/
-npm install
-npm run dev
-# → http://localhost:3000
-```
-
-### 7. Autonomous Systemd Setup
-
-To convert the NIDS and Dashboard into robust background daemons that start on boot and automatically handle logging limits:
-```bash
-# This will link systemd files and start rotating logs
-bash scripts/deploy.sh
-
-# You can then safely close the terminal
-```
+For detailed instructions on all operating modes (Training, Dev, Live, Prod, Demo), please refer to the [**Master Guide**](docs/GUIDE.md).
 
 ---
 
@@ -212,7 +138,7 @@ ai_nids/
 │
 ├── tests/                      #   87 unit tests (pytest)
 ├── docs/
-│   └── SETUP.md                #   full installation guide
+│   └── GUIDE.md                #   full installation guide
 │
 ├── config.yaml                 #   all tuneable parameters
 └── requirements.txt
