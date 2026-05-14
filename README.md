@@ -117,7 +117,7 @@ Evaluation plots are saved to `data/models/`.
 Generate a synthetic attack pcap and run the full pipeline against it:
 
 ```bash
-python scripts/demo.py
+./ai-venv/bin/python scripts/demo.py
 ```
 
 This generates attack traffic, runs detection, and shows a live terminal report. No root, no live interface needed.
@@ -129,14 +129,8 @@ This generates attack traffic, runs detection, and shows a live terminal report.
 ip a
 
 # Run monitor (requires root for raw socket capture)
-sudo -E env PATH="$PATH" python scripts/run_monitor.py --interface eth0
-
-# Or grant cap_net_raw to avoid sudo
-sudo setcap cap_net_raw+eip ai-venv/bin/python3
-python scripts/run_monitor.py --interface eth0
-
-# Or run with sudo with venv preserved via -E flag
-sudo -E env PATH="$PATH" python scripts/run_monitor.py --interface eth0
+# Use the explicit path to the virtual environment python to ensure dependencies are loaded
+sudo ./ai-venv/bin/python scripts/run_monitor.py --interface eth0
 ```
 
 
