@@ -1,0 +1,19 @@
+[Unit]
+Description=AI-NIDS FastAPI Backend
+After=network.target ai-nids-monitor.service
+
+[Service]
+Type=simple
+User={{USER}}
+WorkingDirectory={{PROJECT_ROOT}}
+Environment="PATH={{PROJECT_ROOT}}/ai-venv/bin"
+
+# Run FastAPI server on port 8000
+ExecStart={{PROJECT_ROOT}}/ai-venv/bin/uvicorn api.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+
+Environment="PYTHONUNBUFFERED=1"
+
+[Install]
+WantedBy=multi-user.target

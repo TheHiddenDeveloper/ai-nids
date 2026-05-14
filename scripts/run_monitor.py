@@ -20,6 +20,7 @@ import argparse
 import os
 import psutil
 import yaml
+import subprocess
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -50,6 +51,7 @@ Examples:
     p.add_argument("--no-model",  action="store_true",     help="Signature-only mode (no AI inference)")
     p.add_argument("--dedup",     type=int, default=60,    help="Alert dedup window seconds (default: 60)")
     p.add_argument("--model-dir", default="data/models",  help="Path to trained models directory")
+    p.add_argument("--dashboard", action="store_true",     help="Launch Next.js dashboard & FastAPI backend")
     p.add_argument("--verbose",   action="store_true",     help="Debug-level logging")
     return p
 
@@ -72,7 +74,7 @@ def configure_logging(verbose: bool):
     )
 
 
-def print_banner(args, pipeline: NIDSPipeline):
+def print_banner(args, pipeline: NIDSPipeline, config: dict):
     mode = "pcap replay" if args.pcap else f"live capture on {args.interface}"
     ai   = "AI + signatures" if pipeline.is_model_loaded else "signatures only"
     logger.info("=" * 52)
@@ -80,7 +82,13 @@ def print_banner(args, pipeline: NIDSPipeline):
     logger.info(f"  Mode     : {mode}")
     logger.info(f"  Detection: {ai}")
     logger.info(f"  Dedup    : {args.dedup}s window")
-    logger.info("  Dashboard: streamlit run dashboard/app.py")
+    if args.dashboard:
+        api_port = config.get("dashboard", {}).get("api_port", 8000)
+        frontend_port = config.get("dashboard", {}).get("frontend_port", 3000)
+        logger.info(f"  Dashboard: http://localhost:{frontend_port}")
+        logger.info(f"  API      : http://localhost:{api_port}")
+    else:
+        logger.info(f"  Dashboard: (disabled) Use --dashboard to launch")
     logger.info("=" * 52)
 
 
@@ -114,7 +122,7 @@ def main():
     if not pipeline.start():
         sys.exit(1)
 
-    print_banner(args, pipeline)
+    print_banner(args, pipeline, config)
 
     # ── Graceful shutdown on Ctrl-C / SIGTERM ─────────────────────────────────
     def _shutdown(sig, frame):
@@ -132,6 +140,55 @@ def main():
 
     signal.signal(signal.SIGINT,  _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
+
+    # ── Dashboard Orchestration ───────────────────────────────────────────────
+    ui_procs = []
+    if args.dashboard:
+        logger.info("Launching Next.js Dashboard and API...")
+        
+        # 1. Launch FastAPI
+        api_port = config.get("dashboard", {}).get("api_port", 8000)
+        try:
+            api_proc = subprocess.Popen(
+                [sys.executable, "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", str(api_port)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.STDOUT
+            )
+            ui_procs.append(api_proc)
+            logger.info(f"  [+] FastAPI backend started on port {api_port}")
+        except Exception as e:
+            logger.error(f"  [-] Failed to start FastAPI: {e}")
+
+        # 2. Launch Next.js
+        try:
+            # Check if node_modules exists, if not, skip or warn
+            frontend_dir = Path("frontend")
+            if (frontend_dir / "node_modules").exists():
+                frontend_port = config.get("dashboard", {}).get("frontend_port", 3000)
+                ui_proc = subprocess.Popen(
+                    ["npm", "run", "dev", "--", "-p", str(frontend_port)],
+                    cwd=str(frontend_dir),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.STDOUT
+                )
+                ui_procs.append(ui_proc)
+                logger.info(f"  [+] Next.js frontend started on port {frontend_port}")
+            else:
+                logger.warning("  [-] Next.js frontend skip: node_modules not found. Run 'npm install' in frontend/")
+        except Exception as e:
+            logger.error(f"  [-] Failed to start Next.js: {e}")
+
+    # Inject cleanup into shutdown
+    def _shutdown_with_ui(sig, frame):
+        for p in ui_procs:
+            try:
+                p.terminate()
+                logger.debug(f"Terminated background process {p.pid}")
+            except: pass
+        _shutdown(sig, frame)
+
+    signal.signal(signal.SIGINT,  _shutdown_with_ui)
+    signal.signal(signal.SIGTERM, _shutdown_with_ui)
 
     # ── PCAP replay mode ──────────────────────────────────────────────────────
     if args.pcap:

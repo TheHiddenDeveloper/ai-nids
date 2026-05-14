@@ -1,18 +1,19 @@
 [Unit]
-Description=AI-NIDS Live Dashboard
-After=network.target ai-nids-monitor.service
+Description=AI-NIDS Next.js Dashboard
+After=network.target ai-nids-api.service
 
 [Service]
 Type=simple
 User={{USER}}
-WorkingDirectory={{PROJECT_ROOT}}
+WorkingDirectory={{PROJECT_ROOT}}/frontend
 
-# Explicitly bind FastAPI uvicorn router
-ExecStart="{{PROJECT_ROOT}}/ai-venv/bin/uvicorn" api.main:app --host 0.0.0.0 --port 8000
+# Run Next.js production server on port 3000
+ExecStart=/usr/bin/npm start
 Restart=always
 RestartSec=5
 
-Environment="PYTHONUNBUFFERED=1"
+Environment="NODE_ENV=production"
+Environment="PORT=3000"
 
 [Install]
 WantedBy=multi-user.target

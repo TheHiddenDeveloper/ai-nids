@@ -9,7 +9,7 @@ User=root
 WorkingDirectory={{PROJECT_ROOT}}
 
 # Assuming the virtual environment is inside the project dir: 'ai-venv'
-ExecStart="{{PROJECT_ROOT}}/ai-venv/bin/python" scripts/run_monitor.py --interface {{INTERFACE}} --flow-timeout 20
+ExecStart={{PROJECT_ROOT}}/ai-venv/bin/python scripts/run_monitor.py --interface {{INTERFACE}} --flow-timeout 20
 Restart=always
 RestartSec=5
 

@@ -18,9 +18,20 @@ import threading
 from typing import Callable, Dict, List
 from loguru import logger
 from .redis_client import get_redis_client
-
+import numpy as np
 
 import uuid
+
+class NumpyEncoder(json.JSONEncoder):
+    """Custom JSON encoder to handle numpy types."""
+    def default(self, obj):
+        if isinstance(obj, (np.integer, np.int64, np.int32)):
+            return int(obj)
+        if isinstance(obj, (np.floating, np.float64, np.float32)):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super().default(obj)
 
 class EventBus:
     """
@@ -112,7 +123,7 @@ class EventBus:
                     "_sender": self._instance_id,
                     "payload": payload
                 }
-                self.redis.publish(f"{self.REDIS_PREFIX}{topic}", json.dumps(envelope))
+                self.redis.publish(f"{self.REDIS_PREFIX}{topic}", json.dumps(envelope, cls=NumpyEncoder))
             except Exception as e:
                 logger.error(f"EventBus: Redis publish failed: {e}")
 

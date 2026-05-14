@@ -3,7 +3,8 @@
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-RF%20%2B%20SMOTE-F7931E?logo=scikitlearn&logoColor=white)
 ![TensorFlow](https://img.shields.io/badge/TensorFlow-Autoencoder-FF6F00?logo=tensorflow&logoColor=white)
-![Streamlit](https://img.shields.io/badge/Dashboard-Streamlit-FF4B4B?logo=streamlit&logoColor=white)
+![Next.js](https://img.shields.io/badge/Frontend-Next.js-000000?logo=nextdotjs&logoColor=white)
+![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?logo=fastapi&logoColor=white)
 ![Tests](https://img.shields.io/badge/Tests-87%20passing-22c55e)
 ![License](https://img.shields.io/badge/License-MIT-6366f1)
 
@@ -18,7 +19,7 @@ A production-grade, Python-based NIDS that combines a supervised **Random Forest
 - **Hot-reload signatures** — edit `rules.yaml` while the monitor runs; changes apply within 10 seconds
 - **Alert deduplication** — suppresses repeated alerts from the same source within a configurable window
 - **Online retraining** — periodically retrains on confirmed alerts + recent benign flows
-- **Live Streamlit dashboard** — 8-panel real-time view with timeline, score histogram, top IPs, and signature hit chart
+- **Live Next.js dashboard** — Modern, high-performance UI with real-time updates via FastAPI.
 - **87 unit tests** covering every layer of the pipeline
 - **Trained on CICIDS2017** — 2.8M labelled network flows across 14 attack categories
 
@@ -62,10 +63,14 @@ Live network traffic  ──or──  pcap replay
      ▼           ▼           ▼
  FlowLogger  AlertLogger  StatsTracker
  (JSONL)     (JSONL)      (rolling 5min)
-                               │
-                               ▼
-                     Streamlit Dashboard
-                     (http://localhost:8501)
+                                │
+                                ▼
+                        Next.js Dashboard
+                      (http://localhost:3000)
+                                ▲
+                                │
+                         FastAPI Backend
+                      (http://localhost:8000)
 ```
 
 ---
@@ -135,12 +140,14 @@ sudo -E env PATH="$PATH" python scripts/run_monitor.py --interface eth0
 ```
 
 
-### 6. Dashboard
+### 6. Dashboard (Next.js)
 
 ```bash
 # In a separate terminal
-streamlit run dashboard/app.py
-# → http://localhost:8501
+cd frontend/
+npm install
+npm run dev
+# → http://localhost:3000
 ```
 
 ### 7. Autonomous Systemd Setup
@@ -184,8 +191,13 @@ ai_nids/
 │   ├── loader.py               #   YAML → Rule objects compiler
 │   └── checker.py              #   hot-reloading rule evaluator
 │
-├── dashboard/
-│   └── app.py                  #   Streamlit real-time dashboard
+├── api/                        # Part 3: FastAPI Backend
+│   ├── main.py                 #   REST API endpoints
+│   └── data.py                 #   DB access layer
+│
+├── frontend/                   # Part 4: Next.js Frontend
+│   ├── src/app/                #   App Router components
+│   └── public/                 #   Static assets
 │
 ├── scripts/
 │   ├── train.py                #   CLI: train RF / AE / both
