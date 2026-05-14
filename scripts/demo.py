@@ -179,7 +179,7 @@ class DemoReporter:
         print(f"    {dim('data/alerts.jsonl')}")
         print(f"    {dim('data/flows.jsonl')}")
         print(f"\n  {dim('Launch dashboard:')}")
-        print(f"    {CYAN}streamlit run dashboard/app.py{RESET}\n")
+        print(f"    {CYAN}http://localhost:3000{RESET}\n")
 
 
 # ── Pcap generation ───────────────────────────────────────────────────────────

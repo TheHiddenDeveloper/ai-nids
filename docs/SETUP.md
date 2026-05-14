@@ -103,17 +103,35 @@ sudo setcap cap_net_raw+eip $(which python3)
 python scripts/run_monitor.py --interface eth0
 ```
 
-## 7. Launch the Dashboard
+## 7. Launch the Dashboard (Next.js)
+
+The AI-NIDS dashboard consists of a FastAPI backend and a Next.js frontend.
+
+### A. Start the API & Monitor (Recommended)
+You can now start everything from a single command:
 
 ```bash
-# From the project root (not the dashboard/ folder)
-streamlit run dashboard/app.py
-
-# Custom host/port
-streamlit run dashboard/app.py --server.address 0.0.0.0 --server.port 8501
+sudo -E env PATH="$PATH" python scripts/run_monitor.py --interface eth0 --dashboard
 ```
 
-Open your browser at: http://localhost:8501
+This will launch the Monitor, the FastAPI backend (Port 8000), and the Next.js frontend (Port 3000) simultaneously.
+
+### B. Manual Startup (Development)
+If you prefer to run them separately:
+
+**1. Start the API:**
+```bash
+uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
+
+**2. Start the Frontend:**
+```bash
+cd frontend/
+npm install
+npm run dev
+```
+
+Open your browser at: http://localhost:3000
 
 The dashboard auto-refreshes every 3 seconds and shows:
 - Live alert table with severity colour-coding
@@ -173,8 +191,8 @@ All tuneable parameters live in `config.yaml`:
 **`Model not found`**
 → Run `python scripts/train.py --model rf` first.
 
-**Dashboard shows "No alerts yet"**
-→ The monitor needs to be running in a separate terminal. Start it with `sudo python scripts/run_monitor.py`.
+**Dashboard shows "No data" or "API Error"**
+→ The API needs to be running. Ensure `uvicorn api.main:app` is active or use the `--dashboard` flag in the monitor script.
 
 **`ModuleNotFoundError`**
 → Ensure your venv is activated: `source venv/bin/activate`

@@ -27,6 +27,31 @@ if [ ! -d "$VENV_DIR" ]; then
   exit 1
 fi
 
+# 2b. Check for Node.js and npm (needed for frontend)
+if ! command -v node &> /dev/null; then
+  echo "❌ Error: Node.js is required for the Next.js frontend but not found."
+  echo "Please install Node.js and npm."
+  exit 1
+fi
+
+if ! command -v npm &> /dev/null; then
+  echo "❌ Error: npm is required for the Next.js frontend but not found."
+  echo "Please install npm."
+  exit 1
+fi
+
+echo "Node.js version: $(node --version)"
+echo "npm version: $(npm --version)"
+
+# 2c. Build the Next.js frontend
+echo ""
+echo "Building Next.js frontend..."
+cd "$PROJECT_ROOT/frontend"
+npm install
+npm run build
+cd "$PROJECT_ROOT"
+echo "✅ Frontend build complete"
+
 # 3. Dynamically detect a valid network interface
 # Priority: Ethernet (UP) > Wireless (UP) > First available (not lo/docker)
 INTERFACE=""
@@ -52,6 +77,7 @@ fi
 
 # 4. Define target service files
 MONITOR_SVC="ai-nids-monitor.service"
+API_SVC="ai-nids-api.service"
 DASHBOARD_SVC="ai-nids-dashboard.service"
 
 # 5. Process and copy service files
@@ -76,6 +102,7 @@ process_service() {
 }
 
 process_service "$MONITOR_SVC"
+process_service "$API_SVC"
 process_service "$DASHBOARD_SVC"
 
 # 6. Reload and restart
@@ -84,14 +111,17 @@ sudo systemctl daemon-reload
 
 echo "Enabling services..."
 sudo systemctl enable "$MONITOR_SVC"
+sudo systemctl enable "$API_SVC"
 sudo systemctl enable "$DASHBOARD_SVC"
 
 echo "Restarting services..."
 sudo systemctl restart "$MONITOR_SVC"
+sudo systemctl restart "$API_SVC"
 sudo systemctl restart "$DASHBOARD_SVC"
 
 echo "✅ Deployment Complete!"
 echo ""
 echo "Check status:"
 echo "  sudo systemctl status $MONITOR_SVC"
+echo "  sudo systemctl status $API_SVC"
 echo "  sudo systemctl status $DASHBOARD_SVC"
