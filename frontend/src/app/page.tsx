@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import useSWR from "swr";
-import { ShieldAlert, Activity, BarChart3, Settings as SettingsIcon, Globe2, ActivitySquare, MonitorPlay } from "lucide-react";
+import { ShieldAlert, Activity, BarChart3, Settings as SettingsIcon, Globe2, ActivitySquare, MonitorPlay, ShieldCheck } from "lucide-react";
 import { OverviewTab } from "./components/OverviewTab";
 import { AlertsTab } from "./components/AlertsTab";
 import { IncidentsTab } from "./components/IncidentsTab";
 import { AnalyticsTab } from "./components/AnalyticsTab";
 import { SettingsTab } from "./components/SettingsTab";
+import { SignaturesTab } from "./components/SignaturesTab";
+import { TasksWidget } from "./components/TasksWidget";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
@@ -32,6 +34,7 @@ export default function Dashboard() {
     { id: "alerts", label: "Alerts Explorer", icon: ShieldAlert },
     { id: "incidents", label: "Active Incidents", icon: Globe2 },
     { id: "analytics", label: "Analytics & ML", icon: BarChart3 },
+    { id: "signatures", label: "Signatures", icon: ShieldCheck },
     { id: "settings", label: "Settings", icon: SettingsIcon },
   ];
 
@@ -82,8 +85,10 @@ export default function Dashboard() {
         {activeTab === "alerts" && <AlertsTab alerts={alerts} />}
         {activeTab === "incidents" && <IncidentsTab />}
         {activeTab === "analytics" && <AnalyticsTab flows={flows} />}
+        {activeTab === "signatures" && <SignaturesTab />}
         {activeTab === "settings" && <SettingsTab />}
       </main>
+      <TasksWidget />
     </div>
   );
 }

@@ -14,6 +14,10 @@ from api.data import (
 )
 from core.redis_client import get_redis_client
 from monitor.db import clear_db_data
+from api.jobs import start_job, get_job, list_jobs
+from signatures.loader import load_rules
+import yaml
+import subprocess
 
 app = FastAPI(title="AI-NIDS API", version="1.0.0")
 
@@ -108,6 +112,92 @@ async def wipe_database():
     if not success:
         raise HTTPException(status_code=500, detail="Failed to wipe database")
     return {"status": "success"}
+
+# -----------------
+# Jobs & Background Tasks
+# -----------------
+
+@app.get("/api/jobs")
+async def get_all_jobs():
+    return list_jobs()
+
+@app.get("/api/jobs/{job_id}")
+async def get_single_job(job_id: str):
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+class RetrainRequest(BaseModel):
+    precision: str = "high" # "standard" or "high"
+
+@app.post("/api/models/retrain")
+async def retrain_models(req: RetrainRequest):
+    python_bin = sys.executable
+    cmd = [python_bin, "scripts/train.py", "--precision", req.precision]
+    job_id = start_job(name=f"Model Retraining ({req.precision})", cmd=cmd)
+    return {"job_id": job_id, "status": "started"}
+
+# -----------------
+# Signatures API
+# -----------------
+
+RULES_PATH = Path("signatures/rules.yaml")
+
+@app.get("/api/signatures")
+async def get_signatures():
+    rules = load_rules(str(RULES_PATH))
+    # Convert rules to dict
+    return [
+        {
+            "id": r.id,
+            "name": r.name,
+            "severity": r.severity,
+            "tags": r.tags,
+            "enabled": r.enabled,
+            "description": r.description
+        } for r in rules
+    ]
+
+class SignatureToggle(BaseModel):
+    enabled: bool
+
+@app.post("/api/signatures/{rule_id}/toggle")
+async def toggle_signature(rule_id: str, req: SignatureToggle):
+    # Safe load and update
+    with open(RULES_PATH) as f:
+        data = yaml.safe_load(f)
+    
+    idx = -1
+    for i, r in enumerate(data.get("rules", [])):
+        if r.get("id") == rule_id:
+            idx = i
+            break
+            
+    if idx == -1:
+        raise HTTPException(status_code=404, detail="Rule not found")
+        
+    data["rules"][idx]["enabled"] = req.enabled
+    with open(RULES_PATH, "w") as f:
+        yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        
+    return {"status": "success", "rule_id": rule_id, "enabled": req.enabled}
+
+# -----------------
+# System Monitor Control
+# -----------------
+
+@app.post("/api/system/monitor/restart")
+async def restart_monitor():
+    try:
+        # NOTE: This assumes the user running FastAPI has sudoers NOPASSWD for this service,
+        # or the API is running as root. If it fails, it will return 500.
+        subprocess.run(["sudo", "systemctl", "restart", "ai-nids-monitor.service"], check=True)
+        return {"status": "success"}
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(status_code=500, detail=f"Failed to restart monitor: {str(e)}")
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="systemctl command not found")
 
 # Serve the Next.js static export ONLY if it exists (for production)
 out_dir = Path("frontend/out")

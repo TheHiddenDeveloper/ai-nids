@@ -29,6 +29,14 @@ export function SettingsTab() {
               </p>
            </div>
         </div>
+        <div className="mt-4 flex gap-3">
+          <button onClick={async () => { await fetch("http://localhost:8000/api/system/monitor/restart", { method: "POST" }); alert("Restart initiated."); }} className="bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium px-4 py-2 rounded-xl transition">
+            Restart Monitor Service
+          </button>
+          <button onClick={async () => { await fetch("http://localhost:8000/api/models/retrain", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({precision: "high"}) }); alert("Retraining job started. Check Tasks Widget."); }} className="bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 border border-cyan-500/30 text-sm font-medium px-4 py-2 rounded-xl transition">
+            Retrain AI Models
+          </button>
+        </div>
       </div>
 
       <div className="bg-slate-900 border border-white/5 rounded-2xl p-6">
