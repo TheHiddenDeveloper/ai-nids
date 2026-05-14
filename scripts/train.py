@@ -16,6 +16,23 @@ import json
 import sys
 import os
 from pathlib import Path
+
+# ── Virtual Environment Check ────────────────────────────────────────────────
+def check_venv():
+    try:
+        import loguru
+    except ImportError:
+        print("\033[91m" + "!" * 60 + "\033[0m")
+        print("\033[91mERROR: Missing dependencies (loguru not found).\033[0m")
+        print("\033[93mIt looks like you are not running this script inside the project virtual environment.\033[0m")
+        print("\nFix:")
+        print(f"  1. Use the explicit venv path: \033[1m./ai-venv/bin/python {sys.argv[0]}\033[0m")
+        print("  2. Or activate the venv first: \033[1msource ai-venv/bin/activate && python {sys.argv[0]}\033[0m")
+        print("\033[91m" + "!" * 60 + "\033[0m")
+        sys.exit(1)
+
+check_venv()
+
 from loguru import logger
 from sklearn.model_selection import train_test_split
 
