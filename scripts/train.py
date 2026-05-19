@@ -13,6 +13,7 @@ import pandas as pd
 import numpy as np
 import sqlite3
 import json
+import joblib
 import sys
 import os
 from pathlib import Path
@@ -82,6 +83,9 @@ def main():
     parser = argparse.ArgumentParser(description="AI-NIDS Model Trainer")
     parser.add_argument("--precision", type=str, default="high", choices=["standard", "high"])
     parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--learning_rate", type=float, default=0.001)
+    parser.add_argument("--smote_ratio", type=float, default=1.0)
     args = parser.parse_args()
 
     # 1. Load Research Data (CICIDS2017)
@@ -117,14 +121,118 @@ def main():
     # 4. Train Random Forest (Supervised)
     logger.info("+++ PHASE 1: Training Random Forest (Supervised) +++")
     rf_estimators = 500 if args.precision == "high" else 100
-    train_random_forest(X_train, y_train, X_test, y_test, n_estimators=rf_estimators)
+    rf, rf_scaler = train_random_forest(
+        X_train, y_train, X_test, y_test,
+        n_estimators=rf_estimators,
+        smote_ratio=args.smote_ratio
+    )
 
     # 5. Train Autoencoder (Unsupervised - Benign Only)
     logger.info("+++ PHASE 2: Training Semi-Supervised Autoencoder (Anomaly Detection) +++")
     X_benign = X_train[y_train == 0]
-    train_autoencoder(X_benign, X_test, y_test, epochs=args.epochs)
+    ae, ae_threshold = train_autoencoder(
+        X_benign, X_test, y_test,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        learning_rate=args.learning_rate
+    )
 
-    logger.success("--- HIGH-PRECISION MODELS TRAINED AND SAVED TO data/models/ ---")
+    # 6. Evaluate overall Ensemble performance on test set
+    logger.info("+++ PHASE 3: Evaluating Ensemble Performance +++")
+    from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+    import shutil
+    import time
+    
+    model_dir = Path("data/models")
+    
+    # Scale test set with RF scaler
+    X_test_rf_s = rf_scaler.transform(X_test)
+    rf_scores = rf.predict_proba(X_test_rf_s)[:, 1]
+    
+    # Load and score via AE if successfully trained
+    ae_scaler = joblib.load(model_dir / "ae_scaler.joblib")
+    X_test_ae_s = ae_scaler.transform(X_test)
+    ae_reconstructions = ae.predict(X_test_ae_s, verbose=0)
+    ae_mse = np.mean(np.power(X_test_ae_s - ae_reconstructions, 2), axis=1)
+    ae_scores = np.clip(ae_mse / (ae_threshold * 3.0), 0.0, 1.0)
+    
+    # Combined Ensemble Score (equal weighting of 0.5)
+    ensemble_scores = 0.5 * rf_scores + 0.5 * ae_scores
+    y_pred = (ensemble_scores >= 0.5).astype(int)
+    
+    # Calculate performance metrics
+    accuracy = float(accuracy_score(y_test, y_pred))
+    precision, recall, f1, _ = precision_recall_fscore_support(y_test, y_pred, average="binary", zero_division=0)
+    precision = float(precision)
+    recall = float(recall)
+    f1 = float(f1)
+    
+    logger.info(f"Ensemble Test Set Metrics:")
+    logger.info(f"  Accuracy:  {accuracy:.4f}")
+    logger.info(f"  Precision: {precision:.4f}")
+    logger.info(f"  Recall:    {recall:.4f}")
+    logger.info(f"  F1-Score:  {f1:.4f}")
+
+    logger.success("--- MODELS TRAINED AND SAVED TO data/models/ ---")
+
+    # 7. Versioning Registry
+    ts = int(time.time())
+    version_name = f"v_{ts}"
+    version_dir = model_dir / "versions" / version_name
+    version_dir.mkdir(parents=True, exist_ok=True)
+    
+    logger.info(f"Saving model version → {version_dir}")
+    artifacts = [
+        "nids_model.joblib",
+        "scaler.joblib",
+        "autoencoder.keras",
+        "ae_scaler.joblib",
+        "ae_threshold.joblib"
+    ]
+    for art in artifacts:
+        src = model_dir / art
+        if src.exists():
+            if src.is_dir():
+                shutil.copytree(src, version_dir / art, dirs_exist_ok=True)
+            else:
+                shutil.copy(src, version_dir / art)
+                
+    # Update registry.json
+    registry_path = model_dir / "registry.json"
+    registry = []
+    if registry_path.exists():
+        try:
+            with open(registry_path, "r") as f:
+                registry = json.load(f)
+        except Exception:
+            registry = []
+            
+    # Mark other versions as not active
+    for reg in registry:
+        reg["status"] = "available"
+        
+    entry = {
+        "version": version_name,
+        "timestamp": ts,
+        "accuracy": accuracy,
+        "precision": precision,
+        "recall": recall,
+        "f1_score": f1,
+        "hyperparameters": {
+            "precision": args.precision,
+            "epochs": args.epochs,
+            "batch_size": args.batch_size,
+            "learning_rate": args.learning_rate,
+            "smote_ratio": args.smote_ratio
+        },
+        "status": "deployed"
+    }
+    registry.append(entry)
+    
+    with open(registry_path, "w") as f:
+        json.dump(registry, f, indent=2)
+        
+    logger.success(f"Registered model version {version_name} in {registry_path}")
 
 if __name__ == "__main__":
     main()
