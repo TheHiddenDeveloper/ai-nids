@@ -47,6 +47,8 @@ def test_ai_inference():
         print(f"  RF Score:       {res['rf_score']:.4f}")
         print(f"  AE Score:       {res['ae_score']:.4f}")
         print(f"  Prediction:     {res['label']}")
+        if "explanation" in res:
+            print(f"  Explanation:    {res['explanation']}")
 
     # Assertions
     assert results[0]["score"] < 0.5, "Benign flow flagged as attack"

@@ -24,6 +24,7 @@ def train_random_forest(
     n_estimators: int = 200,
     max_depth: int = 20,
     model_dir: str = "data/models",
+    smote_ratio: float = 1.0,
 ) -> tuple:
     """
     Train a Random Forest binary classifier.
@@ -36,8 +37,8 @@ def train_random_forest(
     X_train_s = scaler.fit_transform(X_train)
     X_test_s = scaler.transform(X_test)
 
-    logger.info("Applying SMOTE to balance classes...")
-    sm = SMOTE(random_state=42)
+    logger.info(f"Applying SMOTE to balance classes (smote_ratio={smote_ratio})...")
+    sm = SMOTE(random_state=42, sampling_strategy=smote_ratio)
     X_res, y_res = sm.fit_resample(X_train_s, y_train)
     logger.info(f"After SMOTE: {len(X_res):,} samples")
 
@@ -72,6 +73,8 @@ def train_autoencoder(
     model_dir: str = "data/models",
     epochs: int = 30,
     threshold_percentile: float = 95.0,
+    batch_size: int = 128,
+    learning_rate: float = 0.001,
 ) -> tuple:
     """
     Train an Autoencoder on BENIGN traffic only.
@@ -104,15 +107,22 @@ def train_autoencoder(
     outputs = keras.layers.Dense(n_features, activation="linear")(x)
 
     autoencoder = keras.Model(inputs, outputs)
-    autoencoder.compile(optimizer="adam", loss="mse")
+    optimizer = keras.optimizers.Adam(learning_rate=learning_rate)
+    autoencoder.compile(optimizer=optimizer, loss="mse")
 
-    logger.info(f"Training High-Precision Autoencoder (epochs={max(epochs, 100)})...")
+    class MetricLoggingCallback(keras.callbacks.Callback):
+        def on_epoch_end(self, epoch, logs=None):
+            logs = logs or {}
+            print(f"[METRIC] epoch: {epoch + 1}, loss: {logs.get('loss', 0):.6f}, val_loss: {logs.get('val_loss', 0):.6f}", flush=True)
+
+    logger.info(f"Training High-Precision Autoencoder (epochs={epochs}, batch_size={batch_size}, learning_rate={learning_rate})...")
     autoencoder.fit(
         X_train_s, X_train_s,
-        epochs=max(epochs, 100),
-        batch_size=128,
+        epochs=epochs,
+        batch_size=batch_size,
         validation_split=0.1,
         verbose=1,
+        callbacks=[MetricLoggingCallback()],
     )
 
     reconstructions = autoencoder.predict(X_test_s)

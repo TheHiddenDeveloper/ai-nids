@@ -7,6 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import time
+import json
+import shutil
+import re
 
 from api.data import (
     load_from_db, load_incidents, get_comparison_stats,
@@ -130,13 +133,137 @@ async def get_single_job(job_id: str):
 
 class RetrainRequest(BaseModel):
     precision: str = "high" # "standard" or "high"
+    epochs: int = 100
+    batch_size: int = 128
+    learning_rate: float = 0.001
+    smote_ratio: float = 1.0
+
+class DeployRequest(BaseModel):
+    version: str
 
 @app.post("/api/models/retrain")
 async def retrain_models(req: RetrainRequest):
-    python_bin = sys.executable
-    cmd = [python_bin, "scripts/train.py", "--precision", req.precision]
+    venv_py = Path("ai-venv/bin/python")
+    python_bin = str(venv_py) if venv_py.exists() else sys.executable
+    cmd = [
+        python_bin, "scripts/train.py",
+        "--precision", req.precision,
+        "--epochs", str(req.epochs),
+        "--batch_size", str(req.batch_size),
+        "--learning_rate", str(req.learning_rate),
+        "--smote_ratio", str(req.smote_ratio)
+    ]
     job_id = start_job(name=f"Model Retraining ({req.precision})", cmd=cmd)
     return {"job_id": job_id, "status": "started"}
+
+@app.get("/api/models/versions")
+async def get_model_versions():
+    registry_path = Path("data/models/registry.json")
+    if not registry_path.exists():
+        return []
+    try:
+        with open(registry_path, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read registry: {e}")
+
+@app.post("/api/models/deploy")
+async def deploy_model_version(req: DeployRequest):
+    model_dir = Path("data/models")
+    registry_path = model_dir / "registry.json"
+    if not registry_path.exists():
+        raise HTTPException(status_code=404, detail="No model registry found.")
+        
+    try:
+        with open(registry_path, "r") as f:
+            registry = json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read registry: {e}")
+        
+    version_entry = None
+    for entry in registry:
+        if entry.get("version") == req.version:
+            version_entry = entry
+            break
+            
+    if not version_entry:
+        raise HTTPException(status_code=404, detail=f"Version {req.version} not found in registry.")
+        
+    version_dir = model_dir / "versions" / req.version
+    if not version_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Version directory {req.version} not found on disk.")
+        
+    artifacts = [
+        "nids_model.joblib",
+        "scaler.joblib",
+        "autoencoder.keras",
+        "ae_scaler.joblib",
+        "ae_threshold.joblib"
+    ]
+    
+    try:
+        for art in artifacts:
+            src = version_dir / art
+            dst = model_dir / art
+            if src.exists():
+                if src.is_dir():
+                    shutil.copytree(src, dst, dirs_exist_ok=True)
+                else:
+                    shutil.copy(src, dst)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to copy model artifacts: {e}")
+        
+    for entry in registry:
+        if entry.get("version") == req.version:
+            entry["status"] = "deployed"
+        else:
+            entry["status"] = "available"
+            
+    try:
+        with open(registry_path, "w") as f:
+            json.dump(registry, f, indent=2)
+    except Exception as e:
+        pass
+        
+    service_restarted = False
+    try:
+        subprocess.run(["sudo", "systemctl", "restart", "ai-nids-monitor.service"], check=True)
+        service_restarted = True
+    except Exception as e:
+        pass
+        
+    return {
+        "status": "success",
+        "deployed_version": req.version,
+        "service_restarted": service_restarted
+    }
+
+@app.get("/api/jobs/{job_id}/metrics")
+async def get_job_metrics(job_id: str):
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+        
+    metrics = []
+    pattern = re.compile(r"\[METRIC\]\s+epoch:\s+(\d+),\s+loss:\s+([0-9.]+),\s+val_loss:\s+([0-9.]+)")
+    
+    for line in job.output:
+        match = pattern.search(line)
+        if match:
+            epoch = int(match.group(1))
+            loss = float(match.group(2))
+            val_loss = float(match.group(3))
+            metrics.append({
+                "epoch": epoch,
+                "loss": loss,
+                "val_loss": val_loss
+            })
+            
+    return {
+        "job_id": job_id,
+        "status": job.status,
+        "metrics": metrics
+    }
 
 # -----------------
 # Signatures API

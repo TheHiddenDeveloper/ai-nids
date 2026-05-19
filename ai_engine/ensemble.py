@@ -25,6 +25,29 @@ from loguru import logger
 
 from monitor.feature_extractor import FEATURE_COLS
 
+HUMAN_FEATURE_NAMES = {
+    "dst_port": "Destination Port",
+    "duration": "Flow Duration",
+    "src_bytes": "Sent Bytes",
+    "dst_bytes": "Received Bytes",
+    "packet_count": "Packet Count",
+    "avg_packet_len": "Average Packet Length",
+    "std_packet_len": "Packet Length Std Dev",
+    "flow_bytes_per_sec": "Flow Bytes/Sec",
+    "flow_packets_per_sec": "Flow Packets/Sec",
+    "fwd_packet_len_max": "Max Forward Packet Length",
+    "bwd_packet_len_max": "Max Backward Packet Length",
+    "flow_iat_mean": "Flow IAT Mean",
+    "flow_iat_std": "Flow IAT Std Dev",
+    "flow_iat_max": "Flow IAT Max",
+    "flow_iat_min": "Flow IAT Min",
+    "fin_flag_count": "FIN Flags",
+    "syn_flag_count": "SYN Flags",
+    "rst_flag_count": "RST Flags",
+    "psh_flag_count": "PSH Flags",
+    "ack_flag_count": "ACK Flags",
+}
+
 
 class EnsembleInferenceEngine:
     """
@@ -132,6 +155,51 @@ class EnsembleInferenceEngine:
         normalised = np.clip(mse / (self._ae_threshold * 3.0), 0.0, 1.0)
         return normalised
 
+    def _explain_flow(self, x_raw: np.ndarray, rf_val: float, ae_val: float) -> dict:
+        """
+        Calculate the top 3 contributing features and the driver model for an anomalous flow.
+        """
+        if rf_val > ae_val:
+            driver = "Supervised Random Forest"
+            if self._scaler is not None:
+                try:
+                    x_scaled = self._scaler.transform(x_raw.reshape(1, -1))[0]
+                    scores = np.abs(x_scaled)
+                    top_indices = np.argsort(scores)[::-1][:3]
+                    
+                    features = []
+                    for idx in top_indices:
+                        col_name = FEATURE_COLS[idx]
+                        features.append({
+                            "name": HUMAN_FEATURE_NAMES.get(col_name, col_name),
+                            "score": float(scores[idx]),
+                        })
+                    return {"driver": driver, "features": features}
+                except Exception as e:
+                    logger.error(f"Error explaining RF flow: {e}")
+        else:
+            driver = "Unsupervised Autoencoder"
+            if self._ae is not None and self._ae_scaler is not None:
+                try:
+                    x_scaled = self._ae_scaler.transform(x_raw.reshape(1, -1))
+                    reconstruction = self._ae.predict(x_scaled, verbose=0)[0]
+                    x_s = x_scaled[0]
+                    recon_errors = np.power(x_s - reconstruction, 2)
+                    top_indices = np.argsort(recon_errors)[::-1][:3]
+                    
+                    features = []
+                    for idx in top_indices:
+                        col_name = FEATURE_COLS[idx]
+                        features.append({
+                            "name": HUMAN_FEATURE_NAMES.get(col_name, col_name),
+                            "score": float(recon_errors[idx]),
+                        })
+                    return {"driver": driver, "features": features}
+                except Exception as e:
+                    logger.error(f"Error explaining AE flow: {e}")
+                    
+        return {"driver": driver if 'driver' in locals() else "Unknown", "features": []}
+
     def predict(self, feature_df) -> List[dict]:
         """
         Score a DataFrame of flow features.
@@ -160,7 +228,7 @@ class EnsembleInferenceEngine:
         results = []
         for i, (ens, rf, ae) in enumerate(zip(ensemble_scores, rf_scores, ae_scores)):
             row = feature_df.iloc[i]
-            results.append({
+            res = {
                 "score":    float(ens),
                 "rf_score": float(rf),
                 "ae_score": float(ae),
@@ -170,7 +238,10 @@ class EnsembleInferenceEngine:
                 "_src_port":  row.get("_src_port"),
                 "_dst_port":  row.get("_dst_port"),
                 "_timestamp": row.get("_timestamp"),
-            })
+            }
+            if ens >= 0.5:
+                res["explanation"] = self._explain_flow(X[i], float(rf), float(ae))
+            results.append(res)
 
         return results
 
