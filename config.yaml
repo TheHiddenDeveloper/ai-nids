@@ -6,7 +6,7 @@ network:
 
 features:
   flow_timeout: 60            # seconds before a flow expires
-  selected_features:          # must match FEATURE_COLS in dataset.py / feature_extractor.py
+  selected_features:          # canonical source is core/features.py
     - dst_port
     - duration
     - src_bytes
@@ -18,6 +18,10 @@ features:
     - flow_packets_per_sec
     - fwd_packet_len_max
     - bwd_packet_len_max
+    - flow_iat_mean
+    - flow_iat_std
+    - flow_iat_max
+    - flow_iat_min
     - fin_flag_count
     - syn_flag_count
     - rst_flag_count

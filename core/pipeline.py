@@ -12,6 +12,7 @@ Run this in a background thread or directly from run_monitor.py.
 import time
 import yaml
 import threading
+import concurrent.futures
 from pathlib import Path
 from typing import Optional
 from loguru import logger
@@ -82,6 +83,9 @@ class NIDSPipeline:
         self.bus   = event_bus   or EventBus()
         self.stats = stats_tracker or StatsTracker()
 
+        # Thread pool for async enrichment (max 4 concurrent lookups)
+        self._intel_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="nids-intel")
+
         # Eviction maintenance — runs periodically in background
         self._stop_event   = threading.Event()
         self._maint_thread: Optional[threading.Thread] = None
@@ -114,6 +118,7 @@ class NIDSPipeline:
     def stop(self):
         """Flush remaining flows and shut down."""
         self._stop_event.set()
+        self._intel_pool.shutdown(wait=False)
         remaining = self.aggregator.flush_all()
         if remaining:
             self._process_flows(remaining)
@@ -168,31 +173,48 @@ class NIDSPipeline:
 
         # Alert path
         alerts = process_results(raw_results, signature_checker=self.sig_checker)
+
+        # Filter out deduplicated alerts
+        active_alerts = []
         for alert in alerts:
             if not self.deduplicator.should_fire(alert):
                 continue
-
             note = self.deduplicator.suppression_note(alert)
             if note:
                 alert["suppression_note"] = note
+            active_alerts.append(alert)
 
-            # Threat Intel Enrichment
-            intel = self.intel.get_enrichment(alert.get("_src_ip"))
-            if intel:
-                alert.update({
-                    "country":      intel.get("country"),
-                    "city":         intel.get("city"),
-                    "asn":          intel.get("asn"),
-                    "threat_level": intel.get("threat_level"),
-                    "is_malicious": intel.get("is_malicious"),
-                    "isp":          intel.get("isp")
-                })
+        # Threat Intel Enrichment — parallel HTTP lookups off the hot path
+        if active_alerts:
+            futures = {}
+            for alert in active_alerts:
+                ip = alert.get("_src_ip")
+                fut = self._intel_pool.submit(self.intel.get_enrichment, ip)
+                futures[fut] = alert
 
-            alert["incident_id"] = self.correlator.process_alert(alert, intel=intel)
+            for fut in concurrent.futures.as_completed(futures):
+                alert = futures[fut]
+                try:
+                    intel = fut.result(timeout=10)
+                except Exception as e:
+                    logger.warning(f"ThreatIntel enrichment failed: {e}")
+                    intel = {}
 
-            self.alert_logger.log_alert(alert)
-            self.stats.record_alert(alert)
-            self.bus.publish("alert", alert)
+                if intel:
+                    alert.update({
+                        "country":      intel.get("country"),
+                        "city":         intel.get("city"),
+                        "asn":          intel.get("asn"),
+                        "threat_level": intel.get("threat_level"),
+                        "is_malicious": intel.get("is_malicious"),
+                        "isp":          intel.get("isp")
+                    })
+
+                alert["incident_id"] = self.correlator.process_alert(alert, intel=intel)
+
+                self.alert_logger.log_alert(alert)
+                self.stats.record_alert(alert)
+                self.bus.publish("alert", alert)
 
         # Periodic stats snapshot
         self.bus.publish("stats", self.stats.snapshot())

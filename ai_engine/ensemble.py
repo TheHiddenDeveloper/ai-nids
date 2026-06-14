@@ -23,30 +23,7 @@ from pathlib import Path
 from typing import List, Optional
 from loguru import logger
 
-from monitor.feature_extractor import FEATURE_COLS
-
-HUMAN_FEATURE_NAMES = {
-    "dst_port": "Destination Port",
-    "duration": "Flow Duration",
-    "src_bytes": "Sent Bytes",
-    "dst_bytes": "Received Bytes",
-    "packet_count": "Packet Count",
-    "avg_packet_len": "Average Packet Length",
-    "std_packet_len": "Packet Length Std Dev",
-    "flow_bytes_per_sec": "Flow Bytes/Sec",
-    "flow_packets_per_sec": "Flow Packets/Sec",
-    "fwd_packet_len_max": "Max Forward Packet Length",
-    "bwd_packet_len_max": "Max Backward Packet Length",
-    "flow_iat_mean": "Flow IAT Mean",
-    "flow_iat_std": "Flow IAT Std Dev",
-    "flow_iat_max": "Flow IAT Max",
-    "flow_iat_min": "Flow IAT Min",
-    "fin_flag_count": "FIN Flags",
-    "syn_flag_count": "SYN Flags",
-    "rst_flag_count": "RST Flags",
-    "psh_flag_count": "PSH Flags",
-    "ack_flag_count": "ACK Flags",
-}
+from core.features import FEATURE_COLS, HUMAN_FEATURE_NAMES
 
 
 class EnsembleInferenceEngine:
@@ -155,50 +132,65 @@ class EnsembleInferenceEngine:
         normalised = np.clip(mse / (self._ae_threshold * 3.0), 0.0, 1.0)
         return normalised
 
-    def _explain_flow(self, x_raw: np.ndarray, rf_val: float, ae_val: float) -> dict:
+    def _batch_explain(self, X: np.ndarray, rf_scores: np.ndarray, ae_scores: np.ndarray, ensemble_scores: np.ndarray) -> dict:
         """
-        Calculate the top 3 contributing features and the driver model for an anomalous flow.
+        Precompute explanations for all anomalous flows in batch.
+        Returns {row_index: {driver, features}} for flows with ens >= 0.5.
         """
-        if rf_val > ae_val:
-            driver = "Supervised Random Forest"
-            if self._scaler is not None:
-                try:
-                    x_scaled = self._scaler.transform(x_raw.reshape(1, -1))[0]
-                    scores = np.abs(x_scaled)
+        anomalous = np.where(ensemble_scores >= 0.5)[0]
+        if len(anomalous) == 0:
+            return {}
+
+        explanations = {}
+
+        ae_driven = [i for i in anomalous if ae_scores[i] > rf_scores[i]]
+        rf_driven = [i for i in anomalous if rf_scores[i] >= ae_scores[i]]
+
+        if ae_driven and self._ae is not None and self._ae_scaler is not None:
+            ae_idx = np.array(ae_driven)
+            try:
+                X_ae_scaled = self._ae_scaler.transform(X[ae_idx])
+                reconstructions = self._ae.predict(X_ae_scaled, verbose=0)
+                recon_errors = np.power(X_ae_scaled - reconstructions, 2)
+
+                for j, original_idx in enumerate(ae_driven):
+                    errors = recon_errors[j]
+                    top_indices = np.argsort(errors)[::-1][:3]
+                    explanations[original_idx] = {
+                        "driver": "Unsupervised Autoencoder",
+                        "features": [
+                            {
+                                "name": HUMAN_FEATURE_NAMES.get(FEATURE_COLS[idx], FEATURE_COLS[idx]),
+                                "score": float(errors[idx]),
+                            }
+                            for idx in top_indices
+                        ],
+                    }
+            except Exception as e:
+                logger.error(f"Batch AE explanation failed: {e}")
+
+        if rf_driven and self._scaler is not None:
+            rf_idx = np.array(rf_driven)
+            try:
+                X_rf_scaled = self._scaler.transform(X[rf_idx])
+
+                for j, original_idx in enumerate(rf_driven):
+                    scores = np.abs(X_rf_scaled[j])
                     top_indices = np.argsort(scores)[::-1][:3]
-                    
-                    features = []
-                    for idx in top_indices:
-                        col_name = FEATURE_COLS[idx]
-                        features.append({
-                            "name": HUMAN_FEATURE_NAMES.get(col_name, col_name),
-                            "score": float(scores[idx]),
-                        })
-                    return {"driver": driver, "features": features}
-                except Exception as e:
-                    logger.error(f"Error explaining RF flow: {e}")
-        else:
-            driver = "Unsupervised Autoencoder"
-            if self._ae is not None and self._ae_scaler is not None:
-                try:
-                    x_scaled = self._ae_scaler.transform(x_raw.reshape(1, -1))
-                    reconstruction = self._ae.predict(x_scaled, verbose=0)[0]
-                    x_s = x_scaled[0]
-                    recon_errors = np.power(x_s - reconstruction, 2)
-                    top_indices = np.argsort(recon_errors)[::-1][:3]
-                    
-                    features = []
-                    for idx in top_indices:
-                        col_name = FEATURE_COLS[idx]
-                        features.append({
-                            "name": HUMAN_FEATURE_NAMES.get(col_name, col_name),
-                            "score": float(recon_errors[idx]),
-                        })
-                    return {"driver": driver, "features": features}
-                except Exception as e:
-                    logger.error(f"Error explaining AE flow: {e}")
-                    
-        return {"driver": driver if 'driver' in locals() else "Unknown", "features": []}
+                    explanations[original_idx] = {
+                        "driver": "Supervised Random Forest",
+                        "features": [
+                            {
+                                "name": HUMAN_FEATURE_NAMES.get(FEATURE_COLS[idx], FEATURE_COLS[idx]),
+                                "score": float(scores[idx]),
+                            }
+                            for idx in top_indices
+                        ],
+                    }
+            except Exception as e:
+                logger.error(f"Batch RF explanation failed: {e}")
+
+        return explanations
 
     def predict(self, feature_df) -> List[dict]:
         """
@@ -211,11 +203,9 @@ class EnsembleInferenceEngine:
 
         X = feature_df[FEATURE_COLS].to_numpy(dtype=np.float32)
 
-        # Compute component scores
         rf_scores = self._rf_score(X)  if self._rf_loaded else np.zeros(len(X))
         ae_scores = self._ae_score(X) if self._ae_loaded else np.zeros(len(X))
 
-        # Weighted ensemble — adjust weights dynamically if only one model present
         if self._rf_loaded and self._ae_loaded:
             rf_w, ae_w = self.rf_weight, self.ae_weight
         elif self._rf_loaded:
@@ -224,6 +214,8 @@ class EnsembleInferenceEngine:
             rf_w, ae_w = 0.0, 1.0
 
         ensemble_scores = np.clip(rf_w * rf_scores + ae_w * ae_scores, 0.0, 1.0)
+
+        explanations = self._batch_explain(X, rf_scores, ae_scores, ensemble_scores)
 
         results = []
         for i, (ens, rf, ae) in enumerate(zip(ensemble_scores, rf_scores, ae_scores)):
@@ -239,8 +231,8 @@ class EnsembleInferenceEngine:
                 "_dst_port":  row.get("_dst_port"),
                 "_timestamp": row.get("_timestamp"),
             }
-            if ens >= 0.5:
-                res["explanation"] = self._explain_flow(X[i], float(rf), float(ae))
+            if i in explanations:
+                res["explanation"] = explanations[i]
             results.append(res)
 
         return results

@@ -15,6 +15,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from loguru import logger
 
+from core.features import FEATURE_COLS
+
 # Mapping: CICIDS2017 column name → our internal feature name
 # Note: MachineLearningCSV.zip does not include a 'Protocol' column —
 # 'Destination Port' is used instead as the protocol proxy.
@@ -42,16 +44,6 @@ CICIDS_COLUMN_MAP = {
     "ACK Flag Count": "ack_flag_count",
     "Label": "label",
 }
-
-FEATURE_COLS = [
-    "dst_port", "duration", "src_bytes", "dst_bytes",
-    "packet_count", "avg_packet_len", "std_packet_len",
-    "flow_bytes_per_sec", "flow_packets_per_sec",
-    "fwd_packet_len_max", "bwd_packet_len_max",
-    "flow_iat_mean", "flow_iat_std", "flow_iat_max", "flow_iat_min",
-    "fin_flag_count", "syn_flag_count", "rst_flag_count",
-    "psh_flag_count", "ack_flag_count",
-]
 
 
 def load_cicids2017(data_dir: str = "data/raw/cicids2017") -> pd.DataFrame:

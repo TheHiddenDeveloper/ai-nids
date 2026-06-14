@@ -78,6 +78,12 @@ class Flow:
             self.fwd_packet_count, self.bwd_packet_count = self.bwd_packet_count, self.fwd_packet_count
             self.fwd_sum_len, self.bwd_sum_len = self.bwd_sum_len, self.fwd_sum_len
             self.fwd_packet_len_max, self.bwd_packet_len_max = self.bwd_packet_len_max, self.fwd_packet_len_max
+            # Reset IAT — prior values accumulated with wrong direction
+            self.sum_iat = 0.0
+            self.sum_sq_iat = 0.0
+            self.max_iat = 0.0
+            self.min_iat = float('inf')
+            self.last_seen = current_ts
             self._is_init_labeled = True
         else:
             iat = max(0.0, current_ts - self.last_seen)

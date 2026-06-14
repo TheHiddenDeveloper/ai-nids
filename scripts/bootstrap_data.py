@@ -11,16 +11,7 @@ import random
 from pathlib import Path
 from loguru import logger
 
-# Using the precise feature columns expected by our dataset loader
-FEATURE_COLS = [
-    "dst_port", "duration", "src_bytes", "dst_bytes",
-    "packet_count", "avg_packet_len", "std_packet_len",
-    "flow_bytes_per_sec", "flow_packets_per_sec",
-    "fwd_packet_len_max", "bwd_packet_len_max",
-    "flow_iat_mean", "flow_iat_std", "flow_iat_max", "flow_iat_min",
-    "fin_flag_count", "syn_flag_count", "rst_flag_count",
-    "psh_flag_count", "ack_flag_count",
-]
+from core.features import FEATURE_COLS
 
 def generate_benign(n=8000):
     """Generates normal-looking traffic profiles."""

@@ -29,7 +29,7 @@ Flat scripts layout. All scripts and tests use `sys.path.insert(0, ...)` to find
 - `test_correlation.py` calls `clear_db_data()` which **deletes all data** from SQLite.
 
 ## Architecture gotchas
-- `FEATURE_COLS` is defined in **two files** (`monitor/feature_extractor.py` and `ai_engine/dataset.py`) and must stay in sync. Also mirrors `config.yaml:features.selected_features`.
+- `FEATURE_COLS` lives in **`core/features.py`** — single source of truth. All other modules import from there. `config.yaml:features.selected_features` is a documentation-only mirror.
 - **Redis is optional** but enabled by default (`redis.active: true` in `config.yaml`). Components have in-memory fallbacks but behavior varies.
 - **SQLite auto-inits** on `import monitor.db` — schema creation and migrations happen at import time.
 - **Hot-reload**: `signatures/checker.py` polls `rules.yaml` every 10s (no filesystem events).

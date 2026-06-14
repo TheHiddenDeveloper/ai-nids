@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import List
 from loguru import logger
 
-from monitor.feature_extractor import FEATURE_COLS
+from core.features import FEATURE_COLS
 
 
 class InferenceEngine:
