@@ -73,6 +73,19 @@ def train_random_forest(
     logger.info(f"Saved scaler → {scaler_path}")
     logger.info(f"Saved feature metadata (hash={feature_hash[:12]}..., {len(FEATURE_COLS)} cols) → {meta_path}")
 
+    # OP6: export RF to ONNX for faster inference
+    try:
+        from skl2onnx import convert_sklearn
+        from skl2onnx.common.data_types import FloatTensorType
+        onnx_path = Path(model_dir) / "nids_model.onnx"
+        initial_type = [('float_input', FloatTensorType([None, X_train_s.shape[1]]))]
+        onx = convert_sklearn(rf, initial_types=initial_type)
+        with open(onnx_path, 'wb') as f:
+            f.write(onx.SerializeToString())
+        logger.info(f"Exported RF to ONNX → {onnx_path}")
+    except Exception as e:
+        logger.warning(f"ONNX export skipped (install skl2onnx): {e}")
+
     return rf, scaler
 
 
@@ -195,5 +208,18 @@ def train_autoencoder(
     joblib.dump(cal_data, Path(model_dir) / "ae_calibration.joblib")
     logger.info(f"Saved autoencoder → {ae_path}")
     logger.info(f"Saved AE calibration (mse_mean={cal_data['mse_mean']:.6f}, mse_std={cal_data['mse_std']:.6f})")
+
+    # OP6: export AE to ONNX for faster inference
+    try:
+        import tf2onnx
+        import tensorflow as tf
+        onnx_path = Path(model_dir) / "autoencoder.onnx"
+        spec = (tf.TensorSpec((None, n_features), tf.float32, name="input"),)
+        onnx_model, _ = tf2onnx.convert.from_keras(autoencoder, input_signature=spec)
+        with open(onnx_path, 'wb') as f:
+            f.write(onnx_model.SerializeToString())
+        logger.info(f"Exported AE to ONNX → {onnx_path}")
+    except Exception as e:
+        logger.warning(f"AE ONNX export skipped (install tf2onnx): {e}")
 
     return autoencoder, threshold

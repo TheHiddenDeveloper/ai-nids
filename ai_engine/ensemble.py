@@ -47,12 +47,14 @@ class EnsembleInferenceEngine:
         self.rf_weight  = rf_weight
         self.ae_weight  = ae_weight
 
-        # RF components
-        self._rf     = None
-        self._scaler = None
+        # RF components (ONNX + joblib fallback — OP6)
+        self._rf       = None
+        self._rf_onnx  = None
+        self._scaler   = None
 
-        # Autoencoder components
+        # Autoencoder components (ONNX + keras fallback — OP6)
         self._ae           = None
+        self._ae_onnx      = None
         self._ae_scaler    = None
         self._ae_threshold = None
         self._ae_mse_mean  = 0.0
@@ -147,52 +149,100 @@ class EnsembleInferenceEngine:
         return True
 
     def _load_rf(self) -> bool:
-        model_path  = self.model_dir / "nids_model.joblib"
-        scaler_path = self.model_dir / "scaler.joblib"
-        if not model_path.exists() or not scaler_path.exists():
+        model_path   = self.model_dir / "nids_model.joblib"
+        onnx_path    = self.model_dir / "nids_model.onnx"
+        scaler_path  = self.model_dir / "scaler.joblib"
+        if not scaler_path.exists():
             return False
         try:
-            self._rf     = joblib.load(model_path)
             self._scaler = joblib.load(scaler_path)
-            logger.info(f"RF loaded from {model_path}")
-            return True
         except Exception as e:
-            logger.error(f"RF load failed: {e}")
+            logger.error(f"RF scaler load failed: {e}")
             return False
+
+        # OP6: try ONNX first, fall back to joblib
+        if onnx_path.exists():
+            try:
+                import onnxruntime as ort
+                self._rf_onnx = ort.InferenceSession(str(onnx_path))
+                self._rf = None
+                logger.info(f"RF loaded from ONNX → {onnx_path}")
+                return True
+            except Exception as e:
+                logger.warning(f"ONNX RF load failed, trying joblib: {e}")
+                self._rf_onnx = None
+
+        if model_path.exists():
+            try:
+                self._rf = joblib.load(model_path)
+                logger.info(f"RF loaded from {model_path}")
+                return True
+            except Exception as e:
+                logger.error(f"RF joblib load failed: {e}")
+                return False
+
+        logger.warning("No RF model found (no joblib or ONNX)")
+        return False
 
     def _load_ae(self) -> bool:
         ae_path    = self.model_dir / "autoencoder.keras"
+        onnx_path  = self.model_dir / "autoencoder.onnx"
         sc_path    = self.model_dir / "ae_scaler.joblib"
         th_path    = self.model_dir / "ae_threshold.joblib"
         cal_path   = self.model_dir / "ae_calibration.joblib"
-        if not all(p.exists() for p in [ae_path, sc_path, th_path]):
+        if not all(p.exists() for p in [sc_path, th_path]):
             return False
         try:
-            import tensorflow as tf
-            self._ae           = tf.keras.models.load_model(str(ae_path))
             self._ae_scaler    = joblib.load(sc_path)
             self._ae_threshold = float(joblib.load(th_path))
-            # M4: load calibration MSE distribution (mean, std)
-            if cal_path.exists():
-                cal = joblib.load(cal_path)
-                self._ae_mse_mean = float(cal.get("mse_mean", 0.0))
-                self._ae_mse_std  = float(cal.get("mse_std", 1.0))
-                logger.info(f"AE calibration loaded (mse_mean={self._ae_mse_mean:.6f}, mse_std={self._ae_mse_std:.6f})")
-            else:
-                self._ae_mse_mean = 0.0
-                self._ae_mse_std  = 1.0
-                logger.warning("No AE calibration found — falling back to z-score defaults")
-            logger.info(f"Autoencoder loaded from {ae_path} (threshold={self._ae_threshold:.6f})")
-            return True
         except Exception as e:
-            logger.warning(f"Autoencoder load failed (not critical): {e}")
+            logger.warning(f"AE scaler/threshold load failed: {e}")
             return False
+
+        if cal_path.exists():
+            cal = joblib.load(cal_path)
+            self._ae_mse_mean = float(cal.get("mse_mean", 0.0))
+            self._ae_mse_std  = float(cal.get("mse_std", 1.0))
+            logger.info(f"AE calibration loaded (mse_mean={self._ae_mse_mean:.6f}, mse_std={self._ae_mse_std:.6f})")
+        else:
+            self._ae_mse_mean = 0.0
+            self._ae_mse_std  = 1.0
+            logger.warning("No AE calibration found — falling back to z-score defaults")
+
+        # OP6: try ONNX first, fall back to keras
+        if onnx_path.exists():
+            try:
+                import onnxruntime as ort
+                self._ae_onnx = ort.InferenceSession(str(onnx_path))
+                self._ae = None
+                logger.info(f"Autoencoder loaded from ONNX → {onnx_path} (threshold={self._ae_threshold:.6f})")
+                return True
+            except Exception as e:
+                logger.warning(f"ONNX AE load failed, trying keras: {e}")
+                self._ae_onnx = None
+
+        if ae_path.exists():
+            try:
+                import tensorflow as tf
+                self._ae = tf.keras.models.load_model(str(ae_path))
+                logger.info(f"Autoencoder loaded from {ae_path} (threshold={self._ae_threshold:.6f})")
+                return True
+            except Exception as e:
+                logger.warning(f"Keras AE load failed: {e}")
+                return False
+
+        logger.warning("No AE model found (no ONNX or keras)")
+        return False
 
     # ── Scoring ───────────────────────────────────────────────────────────────
 
     def _rf_score(self, X: np.ndarray) -> np.ndarray:
-        """Return P(attack) from RF, shape (n,)."""
-        X_s = self._scaler.transform(X)
+        """Return P(attack) from RF, shape (n,). OP6: ONNX path if available."""
+        X_s = self._scaler.transform(X).astype(np.float32)
+        if self._rf_onnx is not None:
+            input_name = self._rf_onnx.get_inputs()[0].name
+            proba = self._rf_onnx.run(None, {input_name: X_s})[1]
+            return proba[:, 1]
         return self._rf.predict_proba(X_s)[:, 1]
 
     def _ae_score(self, X: np.ndarray, X_scaled: np.ndarray = None) -> np.ndarray:
@@ -203,9 +253,15 @@ class EnsembleInferenceEngine:
         Clipped to [0, 1]; z=0 (benign mean) → 0, z=3 (3-sigma) → 1.0.
         Falls back to mse / (threshold * 3) if no calibration data.
         M2: accepts optional pre-scaled array to avoid double transform.
+        OP6: ONNX inference path if available.
         """
         X_s = X_scaled if X_scaled is not None else (self._ae_scaler.transform(X) if self._ae_scaler is not None else X)
-        reconstructions = self._ae.predict(X_s, verbose=0)
+        X_s = X_s.astype(np.float32)
+        if self._ae_onnx is not None:
+            input_name = self._ae_onnx.get_inputs()[0].name
+            reconstructions = self._ae_onnx.run(None, {input_name: X_s})[0]
+        else:
+            reconstructions = self._ae.predict(X_s, verbose=0)
         mse = np.mean(np.power(X_s - reconstructions, 2), axis=1)
         if self._ae_mse_std > 0 and self._ae_mse_mean != 0.0:
             z = (mse - self._ae_mse_mean) / self._ae_mse_std
@@ -231,11 +287,16 @@ class EnsembleInferenceEngine:
         ae_driven = [i for i in anomalous if ae_scores[i] > rf_scores[i]]
         rf_driven = [i for i in anomalous if rf_scores[i] >= ae_scores[i]]
 
-        if ae_driven and self._ae is not None and self._ae_scaler is not None:
+        if ae_driven and (self._ae is not None or self._ae_onnx is not None) and self._ae_scaler is not None:
             ae_idx = np.array(ae_driven)
             try:
                 X_ae = X_ae_scaled_full[ae_idx] if X_ae_scaled_full is not None else self._ae_scaler.transform(X[ae_idx])
-                reconstructions = self._ae.predict(X_ae, verbose=0)
+                X_ae = X_ae.astype(np.float32)
+                if self._ae_onnx is not None:
+                    input_name = self._ae_onnx.get_inputs()[0].name
+                    reconstructions = self._ae_onnx.run(None, {input_name: X_ae})[0]
+                else:
+                    reconstructions = self._ae.predict(X_ae, verbose=0)
                 recon_errors = np.power(X_ae - reconstructions, 2)
 
                 for j, original_idx in enumerate(ae_driven):

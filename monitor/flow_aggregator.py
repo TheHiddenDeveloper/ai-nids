@@ -7,13 +7,13 @@ Computes statistical features per flow for ML input.
 
 import time
 import math
-import threading
 import ipaddress
 import numpy as np
 from typing import Dict, List, Optional, Set
 import json
 from loguru import logger
 from core.redis_client import get_redis_client
+from core.flow_store import ShardedFlowStore
 
 
 class Flow:
@@ -360,8 +360,7 @@ class FlowAggregator:
         self.timeout = flow_timeout
         self.eviction_interval = eviction_interval
         self.home_net = home_net or []
-        self._flows: Dict[tuple, Flow] = {}
-        self._lock = threading.RLock()
+        self._flows = ShardedFlowStore(num_shards=16, max_flows=50000)
         self._last_evict: float = time.time()
         self.redis = get_redis_client()
 
@@ -379,17 +378,19 @@ class FlowAggregator:
         Eviction is handled by the maintenance thread via flush_expired().
         """
         key = self._flow_key(pkt)
-        with self._lock:
-            if key not in self._flows:
-                self._flows[key] = Flow()
-                is_new_flow = True
-            else:
-                is_new_flow = False
-            flow = self._flows[key]
-            pkt["home_nets"] = self.home_net
-            flow.add_packet(pkt)
-            if self.redis:
-                flow.sync_to_redis(self.redis, force=is_new_flow)
+        if not self._flows.contains(key):
+            self._flows.set(key, Flow())
+            is_new_flow = True
+        else:
+            is_new_flow = False
+        flow = self._flows.get(key)
+        if flow is None:
+            flow = Flow()
+            self._flows.set(key, flow)
+        pkt["home_nets"] = self.home_net
+        flow.add_packet(pkt)
+        if self.redis:
+            flow.sync_to_redis(self.redis, force=is_new_flow)
         return []
 
     def flush_expired(self, current_time: float = None) -> List[dict]:
@@ -399,30 +400,30 @@ class FlowAggregator:
     def _evict_expired(self, current_time: float = None) -> List[dict]:
         if current_time is None:
             current_time = time.time()
-        with self._lock:
-            completed = []
-            expired_keys = [k for k, f in self._flows.items() if f.is_expired(self.timeout, current_time)]
-            for k in expired_keys:
-                flow = self._flows.pop(k)
+        completed = []
+        for key, flow in self._flows.items():
+            if flow.is_expired(self.timeout, current_time):
+                popped = self._flows.pop(key)
+                if popped is None:
+                    continue
                 if self.redis:
-                    flow.sync_to_redis(self.redis, force=True)
-                    flow.load_from_redis(self.redis)
-                    self.redis.delete(flow._get_redis_key())
-                    self.redis.zrem("nids:active_flows", flow._get_redis_key())
-                features = flow.to_features()
+                    popped.sync_to_redis(self.redis, force=True)
+                    popped.load_from_redis(self.redis)
+                    self.redis.delete(popped._get_redis_key())
+                    self.redis.zrem("nids:active_flows", popped._get_redis_key())
+                features = popped.to_features()
                 if features:
                     completed.append(features)
         return completed
 
     def flush_all(self) -> List[dict]:
         """Force-complete all active flows (e.g. on shutdown)."""
-        with self._lock:
-            completed = []
-            for flow in self._flows.values():
-                features = flow.to_features()
-                if features:
-                    completed.append(features)
-            self._flows.clear()
+        completed = []
+        for flow in self._flows.values():
+            features = flow.to_features()
+            if features:
+                completed.append(features)
+        self._flows.clear()
         return completed
 
     @property

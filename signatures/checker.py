@@ -3,10 +3,9 @@ Signature Checker  (Step 7 — YAML-backed, hot-reloadable)
 ----------------------------------------------------------
 Replaces the old hardcoded checker with one that reads from rules.yaml.
 
-Hot-reload:
-  - Call checker.reload() explicitly, OR
-  - Instantiate with watch=True and the checker polls the file every
-    watch_interval seconds in a background thread.
+Hot-reload (OP11):
+  - Uses watchdog inotify observer for instant reload on file change
+  - Falls back to polling if watchdog is unavailable
 
 Usage:
     checker = SignatureChecker()                 # load once
@@ -16,7 +15,6 @@ Usage:
 """
 
 import threading
-import time
 from pathlib import Path
 from typing import List, Optional
 from loguru import logger
@@ -42,9 +40,8 @@ class SignatureChecker:
         self.rules_path = rules_path
         self._rules: List[Rule] = []
         self._lock = threading.RLock()
-        self._last_mtime = 0.0
-        self._stop_watch = threading.Event()
-        self._watch_thread: Optional[threading.Thread] = None
+        self._observer: Optional[object] = None
+        self._stop_poll = threading.Event()
 
         self.reload()
 
@@ -114,8 +111,15 @@ class SignatureChecker:
             return False
 
     def stop_watching(self):
-        """Stop the background file-watcher thread."""
-        self._stop_watch.set()
+        """Stop the background file-watcher."""
+        self._stop_poll.set()
+        if self._observer is not None:
+            try:
+                self._observer.stop()
+                self._observer.join(timeout=2)
+            except Exception:
+                pass
+            self._observer = None
 
     # ── Properties ────────────────────────────────────────────────────────────
 
@@ -134,26 +138,51 @@ class SignatureChecker:
         with self._lock:
             return [r.to_dict() for r in self._rules]
 
-    # ── File watcher ──────────────────────────────────────────────────────────
+    # ── File watcher (OP11: watchdog inotify with polling fallback) ───────────
+
+    def _on_file_change(self, event):
+        if Path(event.src_path).resolve() == Path(self.rules_path).resolve():
+            logger.info("SignatureChecker: rules.yaml changed — reloading...")
+            self.reload()
 
     def _start_watcher(self, interval: int):
-        self._watch_thread = threading.Thread(
-            target=self._watch_loop,
-            args=(interval,),
-            daemon=True,
-            name="sig-watcher",
-        )
-        self._watch_thread.start()
-        logger.info(f"SignatureChecker: watching {self.rules_path} every {interval}s")
+        try:
+            from watchdog.observers import Observer
+            from watchdog.events import FileSystemEventHandler
 
-    def _watch_loop(self, interval: int):
-        while not self._stop_watch.wait(timeout=interval):
-            try:
-                mtime = Path(self.rules_path).stat().st_mtime
-                if mtime != self._last_mtime:
-                    logger.info("SignatureChecker: rules.yaml changed — reloading...")
-                    self.reload()
-            except FileNotFoundError:
-                logger.warning(f"SignatureChecker: rules file missing: {self.rules_path}")
-            except Exception as exc:
-                logger.debug(f"SignatureChecker watcher error: {exc}")
+            class RuleHandler(FileSystemEventHandler):
+                def __init__(self, checker):
+                    self.checker = checker
+                def on_modified(self, event):
+                    self.checker._on_file_change(event)
+                def on_created(self, event):
+                    self.checker._on_file_change(event)
+
+            self._observer = Observer()
+            watch_dir = str(Path(self.rules_path).parent)
+            self._observer.schedule(RuleHandler(self), watch_dir, recursive=False)
+            self._observer.daemon = True
+            self._observer.start()
+            logger.info(f"SignatureChecker: watching {self.rules_path} via inotify")
+        except Exception as exc:
+            logger.warning(f"inotify watcher unavailable, falling back to polling: {exc}")
+            self._start_polling(interval)
+
+    def _start_polling(self, interval: int):
+        def _poll():
+            last_mtime = Path(self.rules_path).stat().st_mtime
+            while not self._stop_poll.wait(timeout=interval):
+                try:
+                    mtime = Path(self.rules_path).stat().st_mtime
+                    if mtime != last_mtime:
+                        last_mtime = mtime
+                        logger.info("SignatureChecker: rules.yaml changed — reloading...")
+                        self.reload()
+                except FileNotFoundError:
+                    logger.warning(f"SignatureChecker: rules file missing: {self.rules_path}")
+                except Exception as exc:
+                    logger.debug(f"SignatureChecker watcher error: {exc}")
+
+        t = threading.Thread(target=_poll, daemon=True, name="sig-watcher")
+        t.start()
+        logger.info(f"SignatureChecker: polling {self.rules_path} every {interval}s")

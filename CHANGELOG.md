@@ -1,6 +1,6 @@
 # Changelog
 
-All changes from project inception (`da0fb05`, Apr 1 2026) to present (`6f29567`, Jun 14 2026) — 32 commits, 100 files, ~28k lines added.
+All changes from project inception (`da0fb05`, Apr 1 2026) to present (`f5eb86e`, Jun 14 2026) — 41 commits, ~100 files, ~28k lines added.
 
 ---
 
@@ -84,6 +84,31 @@ All changes from project inception (`da0fb05`, Apr 1 2026) to present (`6f29567`
 - Fixed venv shebangs broken by project directory rename (old `Dev Work/` path with space → `Dev/`)
 - Deploy script cleaned up to only manage `ai-nids-monitor` and `ai-nids-api` services
 - Added Postman API collection (`tests/api-collection.json`) covering all 17 endpoints
+
+### Jun 14 — Feature Centralization, IPv6, Backpressure & Model Diagnostics
+- **Centralized feature definitions** in `core.features` as single source of truth; `config.yaml` features list now documentation-only
+- **Async threat intel enrichment** — non-blocking geo-IP/ASN lookups for alerts
+- Fixed IAT (inter-arrival time) reset logic in flow re-orientation
+- Decoupled configuration loading and JSON utilities into standalone modules
+- **Lazy SQLite initialization** — schema creation deferred until first write
+- Optimized ensemble engine parameters (RF estimator count, AE compression ratio)
+- **Graceful shutdown** for FirewallEngine — clean Redis connection teardown
+- Fixed IAT calculation bugs during flow re-orientation (directional swap)
+- **Model feature hashing** — consistent feature column mapping between training and inference
+- **Autoencoder threshold calibration** — automated anomaly threshold tuning on validation set
+- **Score drift tracking** — monitors model score distribution shifts over time
+- Added `protocol` field to feature set (TCP=6, UDP=17, ICMP=1, other=0)
+- Enhanced autoencoder architecture with dropout layers for regularization
+- Updated training metadata schema with calibration metrics
+- **Minimum TTL tracking** integrated into flow aggregation
+- **IPv6 support** in packet capture and flow aggregation
+- **ICMP parsing** — type/code extraction for ICMP flows
+- **Backpressure mechanism** — queue backpressure signal when processing falls behind
+- **Maintenance loops** for expired flow eviction (configurable TTL-based cleanup)
+- **Data retention policies** — automatic pruning of old alerts and flows from SQLite
+- Threat intelligence integration in maintenance pipeline
+- **Automated config validation** on startup — validates `config.yaml` structure and required fields
+- **Model health diagnostics** — periodic checks for model file integrity, staleness, and prediction consistency
 
 ---
 

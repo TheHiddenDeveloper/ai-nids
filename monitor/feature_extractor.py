@@ -26,49 +26,59 @@ class FeatureExtractor:
         if not flows:
             return None
 
-        df = pd.DataFrame(flows)
+        n = len(flows)
+        n_features = len(FEATURE_COLS)
 
-        meta = df[[c for c in META_COLS if c in df.columns]].copy()
-        feature_df = df[[c for c in FEATURE_COLS if c in df.columns]].copy()
+        # OP4: pre-allocate numpy array instead of pd.DataFrame(list-of-dicts)
+        arr = np.zeros((n, n_features), dtype=np.float32)
+        meta_data = {col: np.empty(n, dtype=object) for col in META_COLS}
 
-        # Fill any missing feature columns with 0
-        for col in FEATURE_COLS:
-            if col not in feature_df.columns:
-                feature_df[col] = 0
+        for i, flow in enumerate(flows):
+            for j, col in enumerate(FEATURE_COLS):
+                val = flow.get(col)
+                if val is not None:
+                    try:
+                        arr[i, j] = float(val)
+                    except (ValueError, TypeError):
+                        pass
+            for col in META_COLS:
+                meta_data[col][i] = flow.get(col)
+
+        feature_df = pd.DataFrame(arr, columns=FEATURE_COLS)
 
         # FV3 — compute flag ratios from raw counts
         for feat, count_col in [("syn_ratio", "syn_flag_count"), ("fin_ratio", "fin_flag_count"),
                                 ("rst_ratio", "rst_flag_count"), ("ack_ratio", "ack_flag_count"),
                                 ("psh_ratio", "psh_flag_count")]:
-            if count_col in feature_df.columns and "packet_count" in feature_df.columns:
-                feature_df[feat] = np.where(
-                    feature_df["packet_count"] > 0,
-                    feature_df[count_col] / feature_df["packet_count"],
-                    0.0
-                )
+            if count_col in FEATURE_COLS and "packet_count" in FEATURE_COLS:
+                pc = feature_df["packet_count"].values
+                cc = feature_df[count_col].values
+                feature_df[feat] = np.where(pc > 0, cc / pc, 0.0)
 
         # FV2 — port category one-hot encoding
-        if "dst_port" in feature_df.columns:
-            port = feature_df["dst_port"]
-            feature_df["port_is_web"]   = port.isin({80, 443, 8080, 8443}).astype(float)
-            feature_df["port_is_mail"]  = port.isin({25, 110, 143, 587, 993, 995}).astype(float)
-            feature_df["port_is_admin"] = port.isin({22, 23, 21, 3389, 5900}).astype(float)
-            feature_df["port_is_db"]    = port.isin({3306, 5432, 27017, 6379}).astype(float)
-            feature_df["port_is_dns"]   = (port == 53).astype(float)
+        if "dst_port" in FEATURE_COLS:
+            port = feature_df["dst_port"].values
+            feature_df["port_is_web"]   = np.isin(port, [80, 443, 8080, 8443]).astype(np.float32)
+            feature_df["port_is_mail"]  = np.isin(port, [25, 110, 143, 587, 993, 995]).astype(np.float32)
+            feature_df["port_is_admin"] = np.isin(port, [22, 23, 21, 3389, 5900]).astype(np.float32)
+            feature_df["port_is_db"]    = np.isin(port, [3306, 5432, 27017, 6379]).astype(np.float32)
+            feature_df["port_is_dns"]   = (port == 53).astype(np.float32)
 
-        feature_df = feature_df[FEATURE_COLS]
+        # OP4: force contiguous copy so .values is writable
+        feature_df = feature_df[FEATURE_COLS].copy()
+        values = feature_df.values
 
-        # Replace inf / -inf, then NaN — warn if data quality is poor
-        inf_mask = np.isinf(feature_df.values)
+        inf_mask = np.isinf(values)
         if inf_mask.any():
             n_inf = int(inf_mask.sum())
             logger.warning(f"Replaced {n_inf} Inf value(s) with 0 — check flow aggregation")
-        feature_df.replace([np.inf, -np.inf], 0, inplace=True)
-        nan_mask = feature_df.isna().values
+        values[inf_mask] = 0.0
+
+        nan_mask = np.isnan(values)
         nan_count = int(nan_mask.sum())
         if nan_count:
             logger.warning(f"Replaced {nan_count} NaN value(s) with 0 — check feature extraction")
-        feature_df.fillna(0, inplace=True)
+        values[nan_mask] = 0.0
 
         # Mark malformed rows (had inf or nan — E2)
         had_issues = inf_mask.any(axis=1) | nan_mask.any(axis=1)
@@ -79,10 +89,12 @@ class FeatureExtractor:
             if col in feature_df.columns:
                 feature_df[col] = feature_df[col].clip(upper=self.clip_upper)
 
-        # Re-attach metadata
+        # Re-attach metadata (skip _is_malformed — already computed)
         for col in META_COLS:
-            if col in meta.columns:
-                feature_df[col] = meta[col].values
+            if col == "_is_malformed":
+                continue
+            if col in meta_data:
+                feature_df[col] = meta_data[col]
 
         logger.debug(f"Extracted features for {len(feature_df)} flows")
         return feature_df

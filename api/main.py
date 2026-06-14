@@ -24,6 +24,9 @@ from api.jobs import start_job, get_job, list_jobs
 from signatures.loader import load_rules
 import yaml
 import subprocess
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 # H4 + O7: optional API key + config validation
 API_KEY = None
@@ -38,6 +41,11 @@ except Exception:
     pass
 
 app = FastAPI(title="AI-NIDS API", version="1.0.0")
+
+# OP9: rate limiting — 100 req/min per IP
+limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 if API_KEY:
     @app.middleware("http")
@@ -71,7 +79,8 @@ class FirewallAction(BaseModel):
 # -----------------
 
 @app.get("/api/kpis")
-async def get_kpis():
+@limiter.limit("100/minute")
+async def get_kpis(request: Request):
     comp = get_comparison_stats()
     uptime_secs = time.time() - START_TIME
     total_alerts = count_rows("alerts")
@@ -85,25 +94,29 @@ async def get_kpis():
     }
 
 @app.get("/api/alerts")
-async def get_alerts(limit: int = 200, offset: int = 0, response: Response = None):
+@limiter.limit("100/minute")
+async def get_alerts(request: Request, limit: int = 200, offset: int = 0, response: Response = None):
     data = load_from_db("alerts", limit=limit, offset=offset)
     if response is not None:
         response.headers["X-Total-Count"] = str(count_rows("alerts"))
     return data
 
 @app.get("/api/flows")
-async def get_flows(limit: int = 200, offset: int = 0, response: Response = None):
+@limiter.limit("100/minute")
+async def get_flows(request: Request, limit: int = 200, offset: int = 0, response: Response = None):
     data = load_from_db("flows", limit=limit, offset=offset)
     if response is not None:
         response.headers["X-Total-Count"] = str(count_rows("flows"))
     return data
 
 @app.get("/api/incidents")
-async def get_incidents(limit: int = 100):
+@limiter.limit("60/minute")
+async def get_incidents(request: Request, limit: int = 100):
     return load_incidents(limit=limit)
 
 @app.get("/api/settings/health")
-async def get_engine_health():
+@limiter.limit("30/minute")
+async def get_engine_health(request: Request):
     redis_conn = get_redis_client()
     models_dir = Path("data/models")
     rf_path  = models_dir / "nids_model.joblib"
@@ -150,7 +163,8 @@ async def get_engine_health():
     }
 
 @app.get("/api/settings/blocked_ips")
-async def get_blocked_ips():
+@limiter.limit("30/minute")
+async def get_blocked_ips(request: Request):
     redis_conn = get_redis_client()
     if not redis_conn:
         return []
@@ -159,7 +173,8 @@ async def get_blocked_ips():
     return sorted(list(blocked))
 
 @app.post("/api/settings/firewall")
-async def firewall_action(action: FirewallAction):
+@limiter.limit("10/minute")
+async def firewall_action(request: Request, action: FirewallAction):
     if action.action not in ["block", "unblock"]:
         raise HTTPException(status_code=400, detail="Invalid action")
     success = send_firewall_command(action.action, action.ip)
@@ -168,7 +183,8 @@ async def firewall_action(action: FirewallAction):
     return {"status": "success", "action": action.action, "ip": action.ip}
 
 @app.post("/api/settings/wipe")
-async def wipe_database():
+@limiter.limit("2/minute")
+async def wipe_database(request: Request):
     success = clear_db_data()
     if not success:
         raise HTTPException(status_code=500, detail="Failed to wipe database")
@@ -179,11 +195,13 @@ async def wipe_database():
 # -----------------
 
 @app.get("/api/jobs")
-async def get_all_jobs():
+@limiter.limit("30/minute")
+async def get_all_jobs(request: Request):
     return list_jobs()
 
 @app.get("/api/jobs/{job_id}")
-async def get_single_job(job_id: str):
+@limiter.limit("30/minute")
+async def get_single_job(request: Request, job_id: str):
     job = get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -200,7 +218,8 @@ class DeployRequest(BaseModel):
     version: str
 
 @app.post("/api/models/retrain")
-async def retrain_models(req: RetrainRequest):
+@limiter.limit("2/minute")
+async def retrain_models(request: Request, req: RetrainRequest):
     venv_py = Path("ai-venv/bin/python")
     python_bin = str(venv_py) if venv_py.exists() else sys.executable
     cmd = [
@@ -215,7 +234,8 @@ async def retrain_models(req: RetrainRequest):
     return {"job_id": job_id, "status": "started"}
 
 @app.get("/api/models/versions")
-async def get_model_versions():
+@limiter.limit("30/minute")
+async def get_model_versions(request: Request):
     registry_path = Path("data/models/registry.json")
     if not registry_path.exists():
         return []
@@ -226,7 +246,8 @@ async def get_model_versions():
         raise HTTPException(status_code=500, detail=f"Failed to read registry: {e}")
 
 @app.post("/api/models/deploy")
-async def deploy_model_version(req: DeployRequest):
+@limiter.limit("5/minute")
+async def deploy_model_version(request: Request, req: DeployRequest):
     model_dir = Path("data/models")
     registry_path = model_dir / "registry.json"
     if not registry_path.exists():
@@ -298,7 +319,8 @@ async def deploy_model_version(req: DeployRequest):
     }
 
 @app.get("/api/jobs/{job_id}/metrics")
-async def get_job_metrics(job_id: str):
+@limiter.limit("30/minute")
+async def get_job_metrics(request: Request, job_id: str):
     job = get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -331,7 +353,8 @@ async def get_job_metrics(job_id: str):
 RULES_PATH = Path("signatures/rules.yaml")
 
 @app.get("/api/signatures")
-async def get_signatures():
+@limiter.limit("30/minute")
+async def get_signatures(request: Request):
     rules = load_rules(str(RULES_PATH))
     # Convert rules to dict
     return [
@@ -349,7 +372,8 @@ class SignatureToggle(BaseModel):
     enabled: bool
 
 @app.post("/api/signatures/{rule_id}/toggle")
-async def toggle_signature(rule_id: str, req: SignatureToggle):
+@limiter.limit("20/minute")
+async def toggle_signature(request: Request, rule_id: str, req: SignatureToggle):
     # Safe load and update
     with open(RULES_PATH) as f:
         data = yaml.safe_load(f)
@@ -374,7 +398,8 @@ async def toggle_signature(rule_id: str, req: SignatureToggle):
 # -----------------
 
 @app.post("/api/system/monitor/restart")
-async def restart_monitor():
+@limiter.limit("1/minute")
+async def restart_monitor(request: Request):
     try:
         subprocess.run(["sudo", "systemctl", "restart", "ai-nids-monitor.service"], check=True)
         return {"status": "success"}
