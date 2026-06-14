@@ -232,6 +232,12 @@ def main():
         "precision": precision,
         "recall": recall,
         "f1_score": f1,
+        "eval_source": "cicids2017_holdout",
+        "eval_note": "Metrics are from CICIDS2017 test split only — live performance will differ",
+        "data_sources": {
+            "research": "CICIDS2017",
+            "live_db": not df_live.empty,
+        },
         "hyperparameters": {
             "precision": args.precision,
             "epochs": args.epochs,

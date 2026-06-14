@@ -36,7 +36,7 @@ HUMAN_FEATURE_NAMES = {
     "ack_flag_count": "ACK Flags",
 }
 
-META_COLS = ["_src_ip", "_dst_ip", "_src_port", "_dst_port", "_timestamp"]
+META_COLS = ["_src_ip", "_dst_ip", "_src_port", "_dst_port", "_protocol", "_timestamp"]
 
 # Verify the two lists are in sync (compiled at import time to catch drift)
 assert len(FEATURE_COLS) == len(HUMAN_FEATURE_NAMES), (

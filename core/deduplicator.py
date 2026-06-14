@@ -37,6 +37,7 @@ class AlertDeduplicator:
             f"{alert.get('_src_ip', '?')}|"
             f"{alert.get('_dst_ip', '?')}|"
             f"{alert.get('_dst_port', '?')}|"
+            f"{alert.get('_protocol', '?')}|"
             f"{alert.get('label', '?')}"
         )
 

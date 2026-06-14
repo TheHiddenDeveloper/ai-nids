@@ -126,12 +126,18 @@ def train_autoencoder(
 
     inputs = keras.Input(shape=(n_features,))
     x = keras.layers.Dense(64, activation="relu")(inputs)
+    x = keras.layers.Dropout(0.2)(x)
     x = keras.layers.Dense(32, activation="relu")(x)
+    x = keras.layers.Dropout(0.2)(x)
     x = keras.layers.Dense(16, activation="relu")(x)
-    x = keras.layers.Dense(8, activation="relu")(x) # Latent space
+    x = keras.layers.Dropout(0.2)(x)
+    x = keras.layers.Dense(8, activation="relu")(x) # Latent space — no dropout
     x = keras.layers.Dense(16, activation="relu")(x)
+    x = keras.layers.Dropout(0.2)(x)
     x = keras.layers.Dense(32, activation="relu")(x)
+    x = keras.layers.Dropout(0.2)(x)
     x = keras.layers.Dense(64, activation="relu")(x)
+    x = keras.layers.Dropout(0.2)(x)
     outputs = keras.layers.Dense(n_features, activation="linear")(x)
 
     autoencoder = keras.Model(inputs, outputs)
