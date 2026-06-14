@@ -51,6 +51,7 @@ class Flow:
         self._is_init_labeled: bool = False
         self._protocol: Optional[int] = None
         self._direction: str = "uncertain"
+        self._min_ttl: Optional[int] = None
 
     def _get_redis_key(self) -> str:
         # Generate a stable string key from the 5-tuple
@@ -121,7 +122,12 @@ class Flow:
         self.ack_flag_count += pkt.get("ack", 0)
         if self._protocol is None:
             self._protocol = pkt.get("protocol")
-        
+
+        ttl = pkt.get("ttl")
+        if ttl is not None:
+            if self._min_ttl is None or ttl < self._min_ttl:
+                self._min_ttl = int(ttl)
+
         # Calculate direction on first packet or when initiator is re-oriented
         if self.packet_count == 1 or (is_syn_init and self._is_init_labeled):
             self._direction = self._calculate_direction(pkt.get("home_nets", []))
@@ -180,7 +186,8 @@ class Flow:
             meta = {
                 "_src_ip": self._src_ip, "_dst_ip": self._dst_ip,
                 "_src_port": self._src_port, "_dst_port": self._dst_port,
-                "_protocol": self._protocol, "_direction": self._direction
+                "_protocol": self._protocol, "_direction": self._direction,
+                "_min_ttl": str(self._min_ttl) if self._min_ttl is not None else "",
             }
             pipe.hset(rky, mapping={k: str(v) for k, v in meta.items() if v is not None})
             
@@ -220,6 +227,8 @@ class Flow:
             self._dst_port = int(data.get("_dst_port")) if data.get("_dst_port") else self._dst_port
             self._protocol = int(data.get("_protocol")) if data.get("_protocol") else self._protocol
             self._direction = data.get("_direction", self._direction)
+            raw_ttl = data.get("_min_ttl")
+            self._min_ttl = int(raw_ttl) if raw_ttl else self._min_ttl
         except Exception as e:
             logger.error(f"Flow: Redis load failed: {e}")
 
@@ -280,6 +289,7 @@ class Flow:
             "_src_port": self._src_port,
             "_dst_port": self._dst_port,
             "_timestamp": self.start_time,
+            "_min_ttl": self._min_ttl,
             "direction": self._direction,
         }
 
