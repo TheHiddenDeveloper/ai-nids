@@ -66,13 +66,11 @@ class NIDSPipeline:
         self.correlator  = IncidentCorrelator(inactivity_window=180) # 3-minute window
         self.intel       = ThreatIntelManager()
 
-        # AI inference (ensemble: RF + Autoencoder)
+        # AI inference (ensemble: RF + Autoencoder, weights from config.yaml)
         self.engine = None
         if use_model:
             self.engine = EnsembleInferenceEngine(
                 model_dir = model_dir,
-                rf_weight = 0.65,
-                ae_weight = 0.35,
             )
 
         # Loggers (now use SQLite via monitor.db)

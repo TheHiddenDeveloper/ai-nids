@@ -39,8 +39,8 @@ class EnsembleInferenceEngine:
     def __init__(
         self,
         model_dir:  str   = "data/models",
-        rf_weight:  float = 0.50,
-        ae_weight:  float = 0.50,
+        rf_weight:  float = None,
+        ae_weight:  float = None,
     ):
         self.model_dir  = Path(model_dir)
         self.rf_weight  = rf_weight
@@ -57,6 +57,27 @@ class EnsembleInferenceEngine:
 
         self._rf_loaded = False
         self._ae_loaded = False
+
+        # Load config defaults (weights, threshold) if not explicitly provided
+        self._load_config()
+
+    # ── Config ────────────────────────────────────────────────────────────────
+
+    def _load_config(self):
+        """Read model weights and threshold from config.yaml, fall back to defaults."""
+        try:
+            import yaml
+            with open("config.yaml") as f:
+                cfg = yaml.safe_load(f) or {}
+        except Exception:
+            cfg = {}
+
+        model_cfg = cfg.get("model", {})
+        if self.rf_weight is None:
+            self.rf_weight = model_cfg.get("rf_weight", 0.50)
+        if self.ae_weight is None:
+            self.ae_weight = model_cfg.get("ae_weight", 0.50)
+        self._threshold = model_cfg.get("anomaly_threshold", 0.5)
 
     # ── Loading ───────────────────────────────────────────────────────────────
 
@@ -217,6 +238,8 @@ class EnsembleInferenceEngine:
 
         explanations = self._batch_explain(X, rf_scores, ae_scores, ensemble_scores)
 
+        threshold = self._threshold
+
         results = []
         for i, (ens, rf, ae) in enumerate(zip(ensemble_scores, rf_scores, ae_scores)):
             row = feature_df.iloc[i]
@@ -224,7 +247,7 @@ class EnsembleInferenceEngine:
                 "score":    float(ens),
                 "rf_score": float(rf),
                 "ae_score": float(ae),
-                "label":    "ATTACK" if ens >= 0.5 else "BENIGN",
+                "label":    "ATTACK" if ens >= threshold else "BENIGN",
                 "_src_ip":    row.get("_src_ip"),
                 "_dst_ip":    row.get("_dst_ip"),
                 "_src_port":  row.get("_src_port"),
@@ -255,10 +278,11 @@ class EnsembleInferenceEngine:
 
     def describe(self) -> dict:
         return {
-            "mode":         self.mode,
-            "rf_loaded":    self._rf_loaded,
-            "ae_loaded":    self._ae_loaded,
-            "rf_weight":    self.rf_weight,
-            "ae_weight":    self.ae_weight,
-            "ae_threshold": self._ae_threshold,
+            "mode":              self.mode,
+            "rf_loaded":         self._rf_loaded,
+            "ae_loaded":         self._ae_loaded,
+            "rf_weight":         self.rf_weight,
+            "ae_weight":         self.ae_weight,
+            "ae_threshold":      self._ae_threshold,
+            "classify_threshold": self._threshold,
         }

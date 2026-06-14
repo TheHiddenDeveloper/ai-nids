@@ -237,7 +237,8 @@ class Flow:
         total_len = self.fwd_sum_len + self.bwd_sum_len
         avg_packet_len = total_len / self.packet_count
         
-        # Variance = (sum_sq / count) - (mean^2)
+        # Variance via computational formula (subject to floating-point error
+        # when sum_sq_len / count ≈ mean², hence the max(0, ...) clamp)
         variance = (self.sum_sq_len / self.packet_count) - (avg_packet_len * avg_packet_len)
         std_packet_len = float(math.sqrt(max(0.0, variance)))
 

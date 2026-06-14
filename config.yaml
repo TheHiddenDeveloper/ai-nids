@@ -29,10 +29,12 @@ features:
     - ack_flag_count
 
 model:
-  type: "random_forest"       # random_forest | autoencoder | ensemble
+  type: "ensemble"            # random_forest | autoencoder | ensemble
   rf_n_estimators: 200
   rf_max_depth: 20
-  anomaly_threshold: 0.65     # score above this = alert
+  rf_weight: 0.65
+  ae_weight: 0.35
+  anomaly_threshold: 0.5      # score above this = label ATTACK
   model_path: "data/models/nids_model.joblib"
   scaler_path: "data/models/scaler.joblib"
   label_encoder_path: "data/models/label_encoder.joblib"

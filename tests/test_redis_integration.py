@@ -7,7 +7,7 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.event_bus import bus
+from core.event_bus import EventBus
 from core.deduplicator import AlertDeduplicator
 
 def test_redis_pubsub():
@@ -17,6 +17,8 @@ def test_redis_pubsub():
     def on_alert(payload):
         print(f"  [Subscriber] Received alert: {payload['id']}")
         received.append(payload)
+
+    bus = EventBus()
 
     # Subscribe (this starts the Redis listener thread)
     bus.subscribe("alert", on_alert)

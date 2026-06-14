@@ -1,25 +1,31 @@
 import sqlite3
-import json
+import threading
 from pathlib import Path
 
 DB_PATH = Path("data/nids.db")
+_db_initialized = False
+_db_init_lock = threading.Lock()
+
 
 def get_db_connection() -> sqlite3.Connection:
-    """Returns a thread-safe, WAL-enabled SQLite connection."""
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    """Returns a thread-safe, WAL-enabled SQLite connection.
+    Lazily initializes the schema on first call."""
+    global _db_initialized
+    if not _db_initialized:
+        with _db_init_lock:
+            if not _db_initialized:
+                DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+                init_db()
+                _db_initialized = True
     
-    # isolation_level=None sets autocommit mode
     conn = sqlite3.connect(DB_PATH, check_same_thread=False, isolation_level=None)
-    
-    # Enable Write-Ahead Logging for high-concurrency read/writes
     conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA synchronous=NORMAL;")  # Speed optimization for WAL
-    
+    conn.execute("PRAGMA synchronous=NORMAL;")
     return conn
 
 def init_db():
     """Initializes the database schema if it doesn't exist."""
-    conn = get_db_connection()
+    conn = sqlite3.connect(DB_PATH, isolation_level=None)
     
     with conn:
         conn.execute("""
@@ -109,9 +115,6 @@ def init_db():
         for col in new_cols:
             if col not in columns_incidents:
                 conn.execute(f"ALTER TABLE incidents ADD COLUMN {col} TEXT")
-
-# Initialize schema on module import
-init_db()
 
 def clear_db_data():
     """Wipes all data from flows and alerts tables, and truncates log files."""

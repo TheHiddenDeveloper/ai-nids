@@ -202,7 +202,8 @@ def main():
             try:
                 p.terminate()
                 logger.debug(f"Terminated background process {p.pid}")
-            except: pass
+            except Exception:
+                logger.debug(f"Failed to terminate background process {p.pid}")
         _shutdown(sig, frame)
 
     signal.signal(signal.SIGINT,  _shutdown_with_ui)

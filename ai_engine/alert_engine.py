@@ -9,11 +9,22 @@ from typing import List, Optional
 from loguru import logger
 
 
-SEVERITY_THRESHOLDS = {
-    "high":   0.92,
-    "medium": 0.80,
-    "low":    0.65,
-}
+def _load_severity_thresholds() -> dict:
+    """Read severity thresholds from config.yaml, fall back to defaults."""
+    defaults = {"high": 0.92, "medium": 0.80, "low": 0.65}
+    try:
+        import yaml
+        with open("config.yaml") as f:
+            cfg = yaml.safe_load(f) or {}
+        overrides = cfg.get("alerts", {}).get("severity_levels", {})
+        if overrides:
+            return {**defaults, **overrides}
+    except Exception:
+        pass
+    return defaults
+
+
+SEVERITY_THRESHOLDS = _load_severity_thresholds()
 
 
 def classify_severity(score: float) -> Optional[str]:

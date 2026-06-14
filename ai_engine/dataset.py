@@ -84,7 +84,12 @@ def load_cicids2017(data_dir: str = "data/raw/cicids2017") -> pd.DataFrame:
 
     # Clean data (NaN/Inf)
     combined.replace([np.inf, -np.inf], np.nan, inplace=True)
+    before = len(combined)
     combined.dropna(inplace=True)
+    after = len(combined)
+    dropped = before - after
+    if dropped:
+        logger.warning(f"Dropped {dropped:,} rows with NaN/Inf values ({dropped/before*100:.1f}%)")
 
     combined["label"] = combined["label"].str.strip()
     # Broad classification: anything not 'BENIGN' is an attack

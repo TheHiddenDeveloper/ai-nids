@@ -9,25 +9,27 @@ import time
 from loguru import logger
 
 from .db import get_db_connection
-
-# Reusing the dictionary serialization logic using a custom encoder for NumPy types
-import numpy as np
-
-class _NumpySafeEncoder(json.JSONEncoder):
-    """Converts numpy scalars and arrays to native Python types."""
-    def default(self, obj):
-        if isinstance(obj, np.integer):
-            return int(obj)
-        if isinstance(obj, np.floating):
-            return float(obj)
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        if isinstance(obj, np.bool_):
-            return bool(obj)
-        return super().default(obj)
+from core.json_utils import NumpyEncoder
 
 def _dumps(record: dict) -> str:
-    return json.dumps(record, cls=_NumpySafeEncoder)
+    return json.dumps(record, cls=NumpyEncoder)
+
+_FLOW_INSERT = "INSERT INTO flows (timestamp, src_ip, dst_ip, dst_port, score, direction, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?)"
+
+
+def _flow_row(record: dict, timestamp: float) -> tuple:
+    """Extract flow DB columns from a record dict, with key fallback."""
+    record["_logged_at"] = timestamp
+    return (
+        timestamp,
+        record.get("_src_ip"),
+        record.get("dst_ip") or record.get("_dst_ip"),
+        record.get("dst_port"),
+        record.get("score"),
+        record.get("direction"),
+        _dumps(record),
+    )
+
 
 class FlowLogger:
     """Logs enriched flow records (features + alert info) to SQLite."""
@@ -36,44 +38,14 @@ class FlowLogger:
         self.conn = get_db_connection()
 
     def log(self, record: dict):
-        timestamp = time.time()
-        record["_logged_at"] = timestamp
-        
-        src_ip = record.get("_src_ip")
-        dst_ip = record.get("dst_ip") or record.get("_dst_ip") # sometimes the extractor maps it differently, fallback check
-        dst_port = record.get("dst_port")
-        score = record.get("score")
-        direction = record.get("direction")
-        
-        raw_json = _dumps(record)
-        
-        self.conn.execute(
-            "INSERT INTO flows (timestamp, src_ip, dst_ip, dst_port, score, direction, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (timestamp, src_ip, dst_ip, dst_port, score, direction, raw_json)
-        )
+        self.conn.execute(_FLOW_INSERT, _flow_row(record, time.time()))
 
     def log_batch(self, records: list):
         if not records:
             return
-            
         timestamp = time.time()
-        rows = []
-        for record in records:
-            record["_logged_at"] = timestamp
-            
-            src_ip = record.get("_src_ip")
-            dst_ip = record.get("dst_ip") or record.get("_dst_ip")
-            dst_port = record.get("dst_port")
-            score = record.get("score")
-            direction = record.get("direction")
-            raw_json = _dumps(record)
-            
-            rows.append((timestamp, src_ip, dst_ip, dst_port, score, direction, raw_json))
-            
-        self.conn.executemany(
-            "INSERT INTO flows (timestamp, src_ip, dst_ip, dst_port, score, direction, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            rows
-        )
+        rows = [_flow_row(r, timestamp) for r in records]
+        self.conn.executemany(_FLOW_INSERT, rows)
 
 
 class AlertLogger:
@@ -113,7 +85,7 @@ class AlertLogger:
             f"[ALERT] {severity.upper()} | "
             f"{src_ip}:{src_port} → "
             f"{dst_ip}:{dst_port} | "
-            f"score={score if score is not None else 0:.3f} | label={label or '?'}"
+            f"score={'?' if score is None else f'{score:.3f}'} | label={label or '?'}"
         )
 
     def recent(self, n: int = 50) -> list:
