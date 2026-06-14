@@ -145,6 +145,20 @@ def main():
     
     model_dir = Path("data/models")
     
+    # Read production weights from config.yaml so eval matches inference
+    import yaml
+    try:
+        with open("config.yaml") as f:
+            _cfg = yaml.safe_load(f) or {}
+        _model_cfg = _cfg.get("model", {})
+        rf_w = _model_cfg.get("rf_weight", 0.65)
+        ae_w = _model_cfg.get("ae_weight", 0.35)
+        cls_thresh = _model_cfg.get("anomaly_threshold", 0.5)
+        logger.info(f"Using production weights from config: rf={rf_w}, ae={ae_w}, threshold={cls_thresh}")
+    except Exception:
+        rf_w, ae_w, cls_thresh = 0.65, 0.35, 0.5
+        logger.warning("Could not read config.yaml, falling back to rf=0.65, ae=0.35")
+    
     # Scale test set with RF scaler
     X_test_rf_s = rf_scaler.transform(X_test)
     rf_scores = rf.predict_proba(X_test_rf_s)[:, 1]
@@ -156,9 +170,9 @@ def main():
     ae_mse = np.mean(np.power(X_test_ae_s - ae_reconstructions, 2), axis=1)
     ae_scores = np.clip(ae_mse / (ae_threshold * 3.0), 0.0, 1.0)
     
-    # Combined Ensemble Score (equal weighting of 0.5)
-    ensemble_scores = 0.5 * rf_scores + 0.5 * ae_scores
-    y_pred = (ensemble_scores >= 0.5).astype(int)
+    # Combined Ensemble Score (weighted from config)
+    ensemble_scores = rf_w * rf_scores + ae_w * ae_scores
+    y_pred = (ensemble_scores >= cls_thresh).astype(int)
     
     # Calculate performance metrics
     accuracy = float(accuracy_score(y_test, y_pred))

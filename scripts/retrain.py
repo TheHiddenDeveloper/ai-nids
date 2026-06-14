@@ -40,7 +40,7 @@ from ai_engine.dataset import FEATURE_COLS
 
 # ── Data loading ──────────────────────────────────────────────────────────────
 
-def load_jsonl_flows(path: Path, label: int, max_rows: int = 5000) -> pd.DataFrame:
+def load_jsonl_flows(path: Path, label: int, max_rows: int = 5000, min_score: float = None) -> pd.DataFrame:
     """Load JSONL flow log, tag with binary label, return feature DataFrame."""
     if not path.exists() or path.stat().st_size == 0:
         return pd.DataFrame()
@@ -49,6 +49,15 @@ def load_jsonl_flows(path: Path, label: int, max_rows: int = 5000) -> pd.DataFra
         lines = [l for l in lines if l][-max_rows:]
         records = [json.loads(l) for l in lines]
         df = pd.DataFrame(records)
+
+        # Filter by minimum score (prevents low-confidence FPs from training)
+        if min_score is not None and "score" in df.columns:
+            before = len(df)
+            df = df[df["score"] >= min_score]
+            kept = len(df)
+            if kept < before:
+                logger.info(f"Filtered attacks by score >= {min_score}: {kept}/{before} kept")
+
         df["is_attack"] = label
         return df
     except Exception as e:
@@ -62,14 +71,15 @@ def build_online_dataset(
     model_dir:   Path,
     max_alerts:  int = 5000,
     max_benign:  int = 5000,
+    min_alert_score: float = 0.80,
 ) -> tuple:
     """
     Build X, y arrays from:
-      - alerts.jsonl  (label=1, attack)
+      - alerts.jsonl  (label=1, attack — filtered by min_alert_score to avoid FPs)
       - flows.jsonl   (label=0, benign — filtered by score < 0.3)
     Returns (X, y) or (None, None) if insufficient data.
     """
-    attacks = load_jsonl_flows(alert_log, label=1, max_rows=max_alerts)
+    attacks = load_jsonl_flows(alert_log, label=1, max_rows=max_alerts, min_score=min_alert_score)
     all_flows = load_jsonl_flows(flow_log, label=0, max_rows=max_benign * 3)
 
     # Keep only clearly benign flows (low score) as negatives
@@ -110,6 +120,7 @@ def retrain(
     flow_log:   Path,
     model_dir:  Path,
     min_alerts: int = 20,
+    min_alert_score: float = 0.80,
 ) -> bool:
     """
     Retrain RF on online data. Backs up existing model before overwriting.
@@ -128,7 +139,7 @@ def retrain(
         )
         return False
 
-    X, y = build_online_dataset(alert_log, flow_log, model_dir)
+    X, y = build_online_dataset(alert_log, flow_log, model_dir, min_alert_score=min_alert_score)
     if X is None or len(X) < 50:
         logger.warning("Insufficient data for retraining.")
         return False
@@ -202,18 +213,20 @@ class RetrainScheduler:
 
     def __init__(
         self,
-        alert_log:     str = "data/alerts.jsonl",
-        flow_log:      str = "data/flows.jsonl",
-        model_dir:     str = "data/models",
-        interval_secs: int = 3600,
-        min_alerts:    int = 50,
+        alert_log:       str = "data/alerts.jsonl",
+        flow_log:        str = "data/flows.jsonl",
+        model_dir:       str = "data/models",
+        interval_secs:   int = 3600,
+        min_alerts:      int = 50,
+        min_alert_score: float = 0.80,
     ):
-        self.alert_log     = Path(alert_log)
-        self.flow_log      = Path(flow_log)
-        self.model_dir     = Path(model_dir)
-        self.interval      = interval_secs
-        self.min_alerts    = min_alerts
-        self._stop         = threading.Event()
+        self.alert_log       = Path(alert_log)
+        self.flow_log        = Path(flow_log)
+        self.model_dir       = Path(model_dir)
+        self.interval        = interval_secs
+        self.min_alerts      = min_alerts
+        self.min_alert_score = min_alert_score
+        self._stop           = threading.Event()
         self._thread: threading.Thread | None = None
 
     def start(self):
@@ -236,7 +249,7 @@ class RetrainScheduler:
             try:
                 retrain(
                     self.alert_log, self.flow_log,
-                    self.model_dir, self.min_alerts,
+                    self.model_dir, self.min_alerts, self.min_alert_score,
                 )
             except Exception as e:
                 logger.error(f"RetrainScheduler error: {e}")
@@ -248,7 +261,8 @@ def main():
     parser = argparse.ArgumentParser(description="AI-NIDS online retrainer")
     parser.add_argument("--once",             action="store_true",  help="Retrain once and exit")
     parser.add_argument("--interval",         type=int, default=3600, help="Retrain interval in seconds")
-    parser.add_argument("--min-new-alerts",   type=int, default=50,   help="Min alerts before retraining")
+    parser.add_argument("--min-new-alerts",   type=int,   default=50,   help="Min alerts before retraining")
+    parser.add_argument("--min-alert-score",  type=float, default=0.80, help="Min score to consider alert a real attack (avoids FP contamination)")
     parser.add_argument("--alert-log",  default="data/alerts.jsonl")
     parser.add_argument("--flow-log",   default="data/flows.jsonl")
     parser.add_argument("--model-dir",  default="data/models")
@@ -260,17 +274,18 @@ def main():
 
     if args.once:
         logger.info("Running one-shot retrain...")
-        success = retrain(alert_log, flow_log, model_dir, args.min_new_alerts)
+        success = retrain(alert_log, flow_log, model_dir, args.min_new_alerts, args.min_alert_score)
         logger.info("Done." if success else "Retrain skipped — see above.")
         return
 
-    logger.info(f"Retrain loop: every {args.interval}s, min {args.min_new_alerts} alerts")
+    logger.info(f"Retrain loop: every {args.interval}s, min {args.min_new_alerts} alerts, min_score={args.min_alert_score}")
     scheduler = RetrainScheduler(
-        alert_log     = str(alert_log),
-        flow_log      = str(flow_log),
-        model_dir     = str(model_dir),
-        interval_secs = args.interval,
-        min_alerts    = args.min_new_alerts,
+        alert_log       = str(alert_log),
+        flow_log        = str(flow_log),
+        model_dir       = str(model_dir),
+        interval_secs   = args.interval,
+        min_alerts      = args.min_new_alerts,
+        min_alert_score = args.min_alert_score,
     )
     scheduler.start()
     try:

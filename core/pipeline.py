@@ -164,9 +164,14 @@ class NIDSPipeline:
                 # Inject flow features so sig_checker can inspect them
                 raw_results[-1].update({k: v for k, v in flow.items() if not k.startswith("_")})
 
-        # Publish all scored flows
+        # Publish all scored flows and track scores for drift detection
         self.flow_logger.log_batch(raw_results)
         for r in raw_results:
+            self.stats.record_flow_score(
+                score=r.get("score", 0.0),
+                label=r.get("label", "BENIGN"),
+                src_ip=r.get("_src_ip"),
+            )
             self.bus.publish("flow", r)
 
         # Alert path

@@ -5,6 +5,7 @@ Trains a Random Forest classifier and/or Autoencoder on CICIDS2017.
 Saves trained models + scaler to data/models/.
 """
 
+import hashlib
 import joblib
 import numpy as np
 from pathlib import Path
@@ -14,6 +15,8 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import classification_report, confusion_matrix
 from imblearn.over_sampling import SMOTE
+
+from core.features import FEATURE_COLS
 
 
 def train_random_forest(
@@ -58,10 +61,17 @@ def train_random_forest(
 
     model_path = Path(model_dir) / "nids_model.joblib"
     scaler_path = Path(model_dir) / "scaler.joblib"
+    meta_path   = Path(model_dir) / "feature_metadata.joblib"
     joblib.dump(rf, model_path)
     joblib.dump(scaler, scaler_path)
+    feature_hash = hashlib.md5(":".join(FEATURE_COLS).encode()).hexdigest()
+    joblib.dump({
+        "feature_hash": feature_hash,
+        "feature_cols": list(FEATURE_COLS),
+    }, meta_path)
     logger.info(f"Saved model → {model_path}")
     logger.info(f"Saved scaler → {scaler_path}")
+    logger.info(f"Saved feature metadata (hash={feature_hash[:12]}...) → {meta_path}")
 
     return rf, scaler
 
@@ -75,24 +85,42 @@ def train_autoencoder(
     threshold_percentile: float = 95.0,
     batch_size: int = 128,
     learning_rate: float = 0.001,
+    cal_ratio: float = 0.2,
 ) -> tuple:
     """
     Train an Autoencoder on BENIGN traffic only.
     Flags anomalies when reconstruction error exceeds the threshold.
+
+    Uses a separate calibration holdout (20% of test set) to select the
+    anomaly threshold, then evaluates on the remaining 80% holdout set.
+    This prevents test set leakage — the threshold is not fitted to the
+    same data used for evaluation.
+
     Returns (autoencoder, threshold).
     """
     try:
         import tensorflow as tf
         from tensorflow import keras
+        from sklearn.model_selection import train_test_split
     except ImportError:
         logger.error("tensorflow not installed: pip install tensorflow")
         return None, None
 
     Path(model_dir).mkdir(parents=True, exist_ok=True)
 
+    # Split test set: cal_ratio for threshold calibration, remainder for eval
+    X_cal, X_eval, y_cal, y_eval = train_test_split(
+        X_test, y_test, test_size=1.0 - cal_ratio, random_state=42, stratify=y_test
+    )
+    logger.info(
+        f"AE test split: cal={len(X_cal)} (threshold selection), "
+        f"eval={len(X_eval)} (final metrics)"
+    )
+
     scaler = StandardScaler()
     X_train_s = scaler.fit_transform(X_train_benign)
-    X_test_s = scaler.transform(X_test)
+    X_cal_s = scaler.transform(X_cal)
+    X_eval_s = scaler.transform(X_eval)
 
     n_features = X_train_s.shape[1]
 
@@ -125,13 +153,18 @@ def train_autoencoder(
         callbacks=[MetricLoggingCallback()],
     )
 
-    reconstructions = autoencoder.predict(X_test_s)
-    mse = np.mean(np.power(X_test_s - reconstructions, 2), axis=1)
-    threshold = float(np.percentile(mse, threshold_percentile))
-    logger.info(f"Anomaly threshold (p{threshold_percentile}): {threshold:.6f}")
+    # Threshold from calibration set (never seen during training or eval)
+    cal_reconstructions = autoencoder.predict(X_cal_s, verbose=0)
+    cal_mse = np.mean(np.power(X_cal_s - cal_reconstructions, 2), axis=1)
+    threshold = float(np.percentile(cal_mse, threshold_percentile))
+    logger.info(f"Anomaly threshold (p{threshold_percentile} on cal set): {threshold:.6f}")
 
-    y_pred = (mse > threshold).astype(int)
-    logger.info("\n" + classification_report(y_test, y_pred, target_names=["Benign", "Attack"]))
+    # Evaluation on holdout set
+    eval_reconstructions = autoencoder.predict(X_eval_s, verbose=0)
+    eval_mse = np.mean(np.power(X_eval_s - eval_reconstructions, 2), axis=1)
+    y_pred = (eval_mse > threshold).astype(int)
+    logger.info(f"AE threshold evaluation (holdout set, n={len(X_eval)}):\n" +
+                classification_report(y_eval, y_pred, target_names=["Benign", "Attack"], zero_division=0))
 
     ae_path = Path(model_dir) / "autoencoder.keras"
     autoencoder.save(ae_path)

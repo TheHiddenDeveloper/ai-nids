@@ -62,6 +62,8 @@ def process_results(
 
         alert = {**result}
         alert["severity"] = severity or "low"
+        # Preserve original model label for downstream comparison
+        alert["model_label"] = alert.get("label", "BENIGN")
         alert["label"]    = "ATTACK"  # If it's an alert, it's an attack/anomaly
 
         if sig_match:

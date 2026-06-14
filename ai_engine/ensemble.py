@@ -17,6 +17,7 @@ model alone:
   - Ensemble: RF anchors known patterns, AE adds zero-day coverage
 """
 
+import hashlib
 import joblib
 import numpy as np
 from pathlib import Path
@@ -81,8 +82,36 @@ class EnsembleInferenceEngine:
 
     # ── Loading ───────────────────────────────────────────────────────────────
 
+    def _check_feature_hash(self) -> bool:
+        """Verify feature metadata matches current FEATURE_COLS. Backward-compat."""
+        meta_path = self.model_dir / "feature_metadata.joblib"
+        if not meta_path.exists():
+            logger.warning(
+                "No feature metadata found (pre-hash model). "
+                "If FEATURE_COLS changed, re-train to avoid silent drift."
+            )
+            return True
+        try:
+            meta = joblib.load(meta_path)
+            expected = hashlib.md5(":".join(FEATURE_COLS).encode()).hexdigest()
+            stored = meta.get("feature_hash")
+            if stored != expected:
+                logger.error(
+                    f"Feature hash mismatch! Expected {expected[:12]}..., "
+                    f"model has {stored[:12]}...\n"
+                    f"FEATURE_COLS changed since training. Re-train or revert FEATURE_COLS."
+                )
+                return False
+            logger.info(f"Feature hash verified ({expected[:12]}...)")
+            return True
+        except Exception as e:
+            logger.warning(f"Feature hash check failed: {e}")
+            return True
+
     def load(self) -> bool:
         """Load available models. Works with RF only if AE not trained yet."""
+        if not self._check_feature_hash():
+            return False
         self._rf_loaded = self._load_rf()
         self._ae_loaded = self._load_ae()
 
@@ -213,6 +242,21 @@ class EnsembleInferenceEngine:
 
         return explanations
 
+    def _validate_input(self, X: np.ndarray) -> None:
+        """Check input quality before scoring. Warns but does not block."""
+        n_features = len(FEATURE_COLS)
+        if X.shape[1] != n_features:
+            logger.error(
+                f"Feature count mismatch: expected {n_features}, got {X.shape[1]}. "
+                f"Check FEATURE_COLS vs feature_extractor."
+            )
+        nan_count = int(np.isnan(X).sum())
+        if nan_count:
+            logger.warning(
+                f"Input contains {nan_count} NaN value(s) — predictions will be degraded. "
+                f"Check flow aggregation and feature extraction."
+            )
+
     def predict(self, feature_df) -> List[dict]:
         """
         Score a DataFrame of flow features.
@@ -223,6 +267,7 @@ class EnsembleInferenceEngine:
             raise RuntimeError("Call load() before predict()")
 
         X = feature_df[FEATURE_COLS].to_numpy(dtype=np.float32)
+        self._validate_input(X)
 
         rf_scores = self._rf_score(X)  if self._rf_loaded else np.zeros(len(X))
         ae_scores = self._ae_score(X) if self._ae_loaded else np.zeros(len(X))
@@ -243,6 +288,9 @@ class EnsembleInferenceEngine:
         results = []
         for i, (ens, rf, ae) in enumerate(zip(ensemble_scores, rf_scores, ae_scores)):
             row = feature_df.iloc[i]
+            # Confidence: 0 at threshold (max uncertainty), 1 at extremes
+            max_dist = max(threshold, 1.0 - threshold)
+            confidence = min(abs(ens - threshold) / max_dist, 1.0) if max_dist > 0 else 1.0
             res = {
                 "score":    float(ens),
                 "rf_score": float(rf),
@@ -253,6 +301,7 @@ class EnsembleInferenceEngine:
                 "_src_port":  row.get("_src_port"),
                 "_dst_port":  row.get("_dst_port"),
                 "_timestamp": row.get("_timestamp"),
+                "confidence": round(confidence, 4),
             }
             if i in explanations:
                 res["explanation"] = explanations[i]

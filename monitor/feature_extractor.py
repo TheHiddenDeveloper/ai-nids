@@ -35,7 +35,14 @@ class FeatureExtractor:
 
         feature_df = feature_df[FEATURE_COLS]
 
-        # Replace inf / -inf, then NaN
+        # Replace inf / -inf, then NaN — warn if data quality is poor
+        inf_mask = np.isinf(feature_df.values)
+        if inf_mask.any():
+            n_inf = int(inf_mask.sum())
+            logger.warning(f"Replaced {n_inf} Inf value(s) with 0 — check flow aggregation")
+        nan_count = feature_df.isna().sum().sum()
+        if nan_count:
+            logger.warning(f"Replaced {nan_count} NaN value(s) with 0 — check feature extraction")
         feature_df.replace([np.inf, -np.inf], 0, inplace=True)
         feature_df.fillna(0, inplace=True)
 
