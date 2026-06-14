@@ -38,6 +38,7 @@ class Flow:
         self.sum_sq_iat: float = 0.0
         self.max_iat: float = 0.0
         self.min_iat: float = float('inf')
+        self._iat_count: int = 0
         
         # Flag counters
         self.fin_flag_count: int = 0
@@ -83,6 +84,7 @@ class Flow:
             self.sum_sq_iat = 0.0
             self.max_iat = 0.0
             self.min_iat = float('inf')
+            self._iat_count = 0
             self.last_seen = current_ts
             self._is_init_labeled = True
         else:
@@ -91,6 +93,7 @@ class Flow:
             self.sum_sq_iat += iat * iat
             if iat > self.max_iat: self.max_iat = float(iat)
             if iat < self.min_iat: self.min_iat = float(iat)
+            self._iat_count += 1
             
         self.last_seen = current_ts
         self.packet_count += 1
@@ -242,7 +245,7 @@ class Flow:
         variance = (self.sum_sq_len / self.packet_count) - (avg_packet_len * avg_packet_len)
         std_packet_len = float(math.sqrt(max(0.0, variance)))
 
-        iat_count = max(1, self.packet_count - 1)
+        iat_count = max(1, self._iat_count)
         flow_iat_mean = self.sum_iat / iat_count
         iat_variance = (self.sum_sq_iat / iat_count) - (flow_iat_mean * flow_iat_mean)
         flow_iat_std = float(math.sqrt(max(0.0, iat_variance)))

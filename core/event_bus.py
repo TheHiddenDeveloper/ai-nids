@@ -36,7 +36,8 @@ class EventBus:
         self._handlers: Dict[str, List[Callable]] = {t: [] for t in self.TOPICS}
         self.redis = get_redis_client()
         self._stop_event = threading.Event()
-        self._listener_thread = None
+        self._listener_thread: Optional[threading.Thread] = None
+        self._pubsub = None
         self._instance_id = str(uuid.uuid4())[:8] # Unique ID for this process
 
     def subscribe(self, topic: str, handler: Callable) -> None:
@@ -59,35 +60,34 @@ class EventBus:
         logger.info(f"EventBus: Started Redis listener thread (ID: {self._instance_id})")
 
     def _redis_listener(self):
-        pubsub = self.redis.pubsub()
-        # Subscribe to all NIDS channels
-        pubsub.psubscribe(f"{self.REDIS_PREFIX}*")
+        self._pubsub = self.redis.pubsub()
+        self._pubsub.psubscribe(f"{self.REDIS_PREFIX}*")
         
-        for message in pubsub.listen():
-            if self._stop_event.is_set():
-                break
-            if message["type"] == "pmessage":
-                try:
-                    # channel name is "nids:alert", so topic is "alert"
-                    topic = message["channel"].split(":", 1)[1]
-                    data = json.loads(message["data"])
-                    
-                    # IGNORE messages from our own instance to avoid double-processing
-                    if data.get("_sender") == self._instance_id:
-                        continue
+        while not self._stop_event.is_set():
+            message = self._pubsub.get_message(timeout=1.0)
+            if message is None or message["type"] != "pmessage":
+                continue
+            try:
+                # channel name is "nids:alert", so topic is "alert"
+                topic = message["channel"].split(":", 1)[1]
+                data = json.loads(message["data"])
+                
+                # Ignore messages from our own instance to avoid double-processing
+                if data.get("_sender") == self._instance_id:
+                    continue
 
-                    payload = data.get("payload")
-                    
-                    # Trigger local handlers for this topic
-                    with self._lock:
-                        handlers = list(self._handlers.get(topic, []))
-                    for h in handlers:
-                        try:
-                            h(payload)
-                        except Exception as e:
-                            logger.error(f"EventBus: Local handler {h.__name__} failed: {e}")
-                except Exception as e:
-                    logger.error(f"EventBus: Failed to process Redis message: {e}")
+                payload = data.get("payload")
+                
+                # Trigger local handlers for this topic
+                with self._lock:
+                    handlers = list(self._handlers.get(topic, []))
+                for h in handlers:
+                    try:
+                        h(payload)
+                    except Exception as e:
+                        logger.error(f"EventBus: Local handler {h.__name__} failed: {e}")
+            except Exception as e:
+                logger.error(f"EventBus: Failed to process Redis message: {e}")
 
     def publish(self, topic: str, payload: dict) -> None:
         if topic not in self.TOPICS:
@@ -118,9 +118,14 @@ class EventBus:
 
     def stop(self):
         self._stop_event.set()
-        if self.redis:
-            # We don't necessarily want to close the shared redis client here
-            pass
+        if self._pubsub:
+            try:
+                self._pubsub.unsubscribe()
+                self._pubsub.close()
+            except Exception:
+                pass
+        if self._listener_thread and self._listener_thread is not threading.current_thread():
+            self._listener_thread.join(timeout=5)
 
     def subscriber_count(self, topic: str) -> int:
         return len(self._handlers.get(topic, []))

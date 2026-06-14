@@ -274,6 +274,28 @@ class TestSignatureChecker:
         checker.stop_watching()
         assert checker.rule_count == 3
 
+    def test_reload_malformed_yaml_preserves_rules(self):
+        """Reload with bad YAML must not lose existing rules."""
+        path = self._write_yaml(MINIMAL_YAML)
+        checker = SignatureChecker(rules_path=str(path))
+        assert checker.rule_count == 2
+
+        # Overwrite with garbage
+        path.write_text("not: valid: yaml: [[[")
+        assert checker.reload() is False
+        assert checker.rule_count == 2, "Existing rules must survive bad reload"
+
+    def test_watcher_handles_file_deletion(self):
+        """Watcher must not crash when the rules file disappears."""
+        path = self._write_yaml(MINIMAL_YAML)
+        checker = SignatureChecker(rules_path=str(path), watch=True, watch_interval=1)
+        assert checker.rule_count == 2
+
+        path.unlink()
+        time.sleep(2.5)  # let watcher cycle detect the deletion
+        checker.stop_watching()
+        assert checker.rule_count == 2  # last good ruleset stays
+
     def test_rules_summary(self):
         path = self._write_yaml(MINIMAL_YAML)
         checker = SignatureChecker(rules_path=str(path))

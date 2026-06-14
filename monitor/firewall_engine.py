@@ -26,6 +26,8 @@ class FirewallEngine:
             ipaddress.ip_network("192.168.0.0/16"),
             ipaddress.ip_network("127.0.0.0/8")
         ]
+        self._stop_event = threading.Event()
+        self._pubsub = None
 
     def _is_safe(self, ip_str: str) -> bool:
         try:
@@ -71,24 +73,36 @@ class FirewallEngine:
         if not self.redis: return
         
         logger.info("FirewallEngine: Listening for commands on Redis...")
-        pubsub = self.redis.pubsub()
-        pubsub.subscribe(self.COMMAND_CHANNEL)
+        self._pubsub = self.redis.pubsub()
+        self._pubsub.subscribe(self.COMMAND_CHANNEL)
         
-        for message in pubsub.listen():
-            if message['type'] == 'message':
-                try:
-                    data = json.loads(message['data'])
-                    action = data.get("action")
-                    ip = data.get("ip")
-                    
-                    if action == "block" and ip:
-                        self.block_ip(ip)
-                    elif action == "unblock" and ip:
-                        self.unblock_ip(ip)
-                    else:
-                        logger.warning(f"FirewallEngine: Unknown action/missing IP: {data}")
-                except Exception as e:
-                    logger.error(f"FirewallEngine: Error processing message: {e}")
+        while not self._stop_event.is_set():
+            message = self._pubsub.get_message(timeout=1.0)
+            if message is None or message['type'] != 'message':
+                continue
+            try:
+                data = json.loads(message['data'])
+                action = data.get("action")
+                ip = data.get("ip")
+                
+                if action == "block" and ip:
+                    self.block_ip(ip)
+                elif action == "unblock" and ip:
+                    self.unblock_ip(ip)
+                else:
+                    logger.warning(f"FirewallEngine: Unknown action/missing IP: {data}")
+            except Exception as e:
+                logger.error(f"FirewallEngine: Error processing message: {e}")
+
+    def stop(self):
+        """Signal the Redis listener to shut down cleanly."""
+        self._stop_event.set()
+        if self._pubsub:
+            try:
+                self._pubsub.unsubscribe()
+                self._pubsub.close()
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     engine = FirewallEngine()
