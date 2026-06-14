@@ -4,7 +4,7 @@
 
 set -e
 
-PROJECT_ROOT="/home/thehiddendeveloper/Dev Work/ai-nids"
+PROJECT_ROOT="/home/thehiddendeveloper/Dev/ai-nids"
 DATA_DIR="$PROJECT_ROOT/data/raw/cicids2017"
 mkdir -p "$DATA_DIR"
 

@@ -9,7 +9,7 @@ from huggingface_hub import hf_hub_download
 from pathlib import Path
 from loguru import logger
 
-PROJECT_ROOT = Path("/home/thehiddendeveloper/Dev Work/ai-nids")
+PROJECT_ROOT = Path("/home/thehiddendeveloper/Dev/ai-nids")
 DATA_DIR = PROJECT_ROOT / "data/raw/cicids2017"
 REPO_ID = "c01dsnap/CIC-IDS2017"
 
