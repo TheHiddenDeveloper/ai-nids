@@ -14,8 +14,14 @@ DATA_DIR = PROJECT_ROOT / "data/raw/cicids2017"
 REPO_ID = "c01dsnap/CIC-IDS2017"
 
 FILES = [
+    "Monday-WorkingHours.pcap_ISCX.csv",
+    "Tuesday-WorkingHours.pcap_ISCX.csv",
+    "Wednesday-workingHours.pcap_ISCX.csv",
+    "Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv",
+    "Thursday-WorkingHours-Afternoon-Infilteration.pcap_ISCX.csv",
+    "Friday-WorkingHours-Morning.pcap_ISCX.csv",
     "Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv",
-    "Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv"
+    "Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv",
 ]
 
 def fetch():

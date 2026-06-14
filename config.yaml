@@ -27,6 +27,16 @@ features:
     - rst_flag_count
     - psh_flag_count
     - ack_flag_count
+    - syn_ratio
+    - fin_ratio
+    - rst_ratio
+    - ack_ratio
+    - psh_ratio
+    - port_is_web
+    - port_is_mail
+    - port_is_admin
+    - port_is_db
+    - port_is_dns
 
 model:
   type: "ensemble"            # random_forest | autoencoder | ensemble
@@ -59,6 +69,9 @@ threat_intel:
   feeds:
     emerging_threats: "https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt"
     feodo_tracker: "https://feodotracker.abuse.ch/downloads/ipblocklist.txt"
+
+retention:
+  days: 30                # O1: delete flows/alerts older than this (0 = keep forever)
 
 logging:
   level: "INFO"

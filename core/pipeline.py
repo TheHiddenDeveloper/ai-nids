@@ -28,6 +28,7 @@ from core.deduplicator import AlertDeduplicator
 from core.stats_tracker import StatsTracker
 from core.correlator import IncidentCorrelator
 from core.threat_intel import ThreatIntelManager
+from monitor.db import cleanup_old_data
 
 
 class NIDSPipeline:
@@ -54,6 +55,7 @@ class NIDSPipeline:
         stats_tracker:   Optional[StatsTracker] = None,
         home_net:        Optional[list] = None,
         max_active_flows: int = 50000,
+        retention_days:  int = 30,
     ):
         self.use_model      = use_model
         self.use_signatures = use_signatures
@@ -86,7 +88,10 @@ class NIDSPipeline:
         # Thread pool for async enrichment (max 4 concurrent lookups)
         self._intel_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="nids-intel")
 
-        # Eviction maintenance — runs periodically in background
+        # O1: data retention (0 = keep forever)
+        self.retention_days = retention_days
+        self._cleanup_counter = 0
+
         self._stop_event   = threading.Event()
         self._maint_thread: Optional[threading.Thread] = None
 
@@ -225,9 +230,8 @@ class NIDSPipeline:
         self.bus.publish("stats", self.stats.snapshot())
 
     def _maintenance_loop(self):
-        """Background: evict stale flows, dedup keys, and incidents."""
+        """Background: evict stale flows, dedup keys, incidents, old data."""
         while not self._stop_event.wait(timeout=10):
-            # L2: evict expired flows from the aggregator
             expired_flows = self.aggregator.flush_expired()
             if expired_flows:
                 logger.debug(f"Maintenance: evicted {len(expired_flows)} expired flows")
@@ -242,6 +246,11 @@ class NIDSPipeline:
                 logger.info(f"Maintenance: closed {len(closed)} stale incidents")
                 for cid in closed:
                     self.bus.publish("incident_update", {"id": cid, "status": "closed"})
+
+            # O1: periodic data retention cleanup (~every 100 iterations ≈ 17min)
+            self._cleanup_counter += 1
+            if self.retention_days > 0 and self._cleanup_counter % 100 == 0:
+                cleanup_old_data(retention_days=self.retention_days)
 
     @property
     def active_flows(self) -> int:

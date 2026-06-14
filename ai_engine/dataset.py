@@ -78,6 +78,21 @@ def load_cicids2017(data_dir: str = "data/raw/cicids2017") -> pd.DataFrame:
     if "fwd_count" in combined.columns and "bwd_count" in combined.columns:
         combined["packet_count"] = combined["fwd_count"] + combined["bwd_count"]
 
+    # FV3 — compute flag ratios from raw CICIDS counts
+    for count_col in ["syn_flag_count", "fin_flag_count", "rst_flag_count", "ack_flag_count", "psh_flag_count"]:
+        ratio_col = count_col.replace("_count", "_ratio").replace("flag", "")
+        if count_col in combined.columns and "packet_count" in combined.columns:
+            combined[ratio_col] = np.where(combined["packet_count"] > 0, combined[count_col] / combined["packet_count"], 0.0)
+
+    # FV2 — port category one-hot encoding
+    if "dst_port" in combined.columns:
+        port = combined["dst_port"]
+        combined["port_is_web"]   = port.isin({80, 443, 8080, 8443}).astype(float)
+        combined["port_is_mail"]  = port.isin({25, 110, 143, 587, 993, 995}).astype(float)
+        combined["port_is_admin"] = port.isin({22, 23, 21, 3389, 5900}).astype(float)
+        combined["port_is_db"]    = port.isin({3306, 5432, 27017, 6379}).astype(float)
+        combined["port_is_dns"]   = (port == 53).astype(float)
+
     needed = FEATURE_COLS + ["label"]
     available = [c for c in needed if c in combined.columns]
     combined = combined[available].copy()

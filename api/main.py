@@ -18,17 +18,21 @@ from api.data import (
     send_firewall_command
 )
 from core.redis_client import get_redis_client
+from core.config_validator import validate_config
 from monitor.db import clear_db_data
 from api.jobs import start_job, get_job, list_jobs
 from signatures.loader import load_rules
 import yaml
 import subprocess
 
-# H4: optional API key — set api.key in config.yaml to enforce
+# H4 + O7: optional API key + config validation
 API_KEY = None
 try:
     with open("config.yaml") as f:
         cfg = yaml.safe_load(f) or {}
+    if not validate_config(cfg):
+        import logging
+        logging.warning("config.yaml validation failed — continuing with loaded values")
     API_KEY = cfg.get("api", {}).get("key") or None
 except Exception:
     pass
@@ -101,14 +105,47 @@ async def get_incidents(limit: int = 100):
 @app.get("/api/settings/health")
 async def get_engine_health():
     redis_conn = get_redis_client()
-    rf_exists = Path("data/models/nids_model.joblib").exists()
-    ae_exists = Path("data/models/autoencoder.keras").exists()
-    
+    models_dir = Path("data/models")
+    rf_path  = models_dir / "nids_model.joblib"
+    ae_path  = models_dir / "autoencoder.keras"
+    rf_valid = False
+    ae_valid = False
+
+    # Model sanity check: try loading RF and making a prediction
+    if rf_path.exists():
+        try:
+            from joblib import load as jload
+            from sklearn.preprocessing import StandardScaler
+            scaler_path = models_dir / "scaler.joblib"
+            rf_model = jload(rf_path)
+            scaler = jload(scaler_path) if scaler_path.exists() else None
+            from core.features import FEATURE_COLS
+            import numpy as np
+            dummy = np.zeros((1, len(FEATURE_COLS)), dtype=np.float32)
+            if scaler:
+                dummy = scaler.transform(dummy)
+            rf_model.predict(dummy)
+            rf_valid = True
+        except Exception as e:
+            rf_valid = f"error: {e}"
+
+    if ae_path.exists():
+        try:
+            from tensorflow.keras.models import load_model
+            ae_model = load_model(ae_path)
+            from core.features import FEATURE_COLS
+            import numpy as np
+            dummy = np.zeros((1, len(FEATURE_COLS)), dtype=np.float32)
+            ae_model.predict(dummy, verbose=0)
+            ae_valid = True
+        except Exception as e:
+            ae_valid = f"error: {e}"
+
     return {
         "redis_connected": bool(redis_conn),
         "models": {
-            "random_forest": rf_exists,
-            "autoencoder": ae_exists
+            "random_forest": {"exists": rf_path.exists(), "healthy": rf_valid},
+            "autoencoder":  {"exists": ae_path.exists(), "healthy": ae_valid},
         }
     }
 

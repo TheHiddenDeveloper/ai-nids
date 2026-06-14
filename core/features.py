@@ -11,6 +11,10 @@ FEATURE_COLS = [
     "flow_iat_mean", "flow_iat_std", "flow_iat_max", "flow_iat_min",
     "fin_flag_count", "syn_flag_count", "rst_flag_count",
     "psh_flag_count", "ack_flag_count",
+    # FV3 — flag ratios (normalized by packet_count)
+    "syn_ratio", "fin_ratio", "rst_ratio", "ack_ratio", "psh_ratio",
+    # FV2 — port category one-hot (known-service flags)
+    "port_is_web", "port_is_mail", "port_is_admin", "port_is_db", "port_is_dns",
 ]
 
 HUMAN_FEATURE_NAMES = {
@@ -34,6 +38,16 @@ HUMAN_FEATURE_NAMES = {
     "rst_flag_count": "RST Flags",
     "psh_flag_count": "PSH Flags",
     "ack_flag_count": "ACK Flags",
+    "syn_ratio": "SYN Ratio",
+    "fin_ratio": "FIN Ratio",
+    "rst_ratio": "RST Ratio",
+    "ack_ratio": "ACK Ratio",
+    "psh_ratio": "PSH Ratio",
+    "port_is_web": "Port is Web (80,443,8080,8443)",
+    "port_is_mail": "Port is Mail (25,110,143,587,993,995)",
+    "port_is_admin": "Port is Admin (22,23,21,3389,5900)",
+    "port_is_db": "Port is DB (3306,5432,27017,6379)",
+    "port_is_dns": "Port is DNS (53)",
 }
 
 META_COLS = [

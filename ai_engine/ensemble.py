@@ -58,6 +58,9 @@ class EnsembleInferenceEngine:
         self._ae_mse_mean  = 0.0
         self._ae_mse_std   = 1.0
 
+        # Feature columns this model was trained on (backward compat)
+        self._model_feature_cols: List[str] = list(FEATURE_COLS)
+
         self._rf_loaded = False
         self._ae_loaded = False
 
@@ -85,26 +88,36 @@ class EnsembleInferenceEngine:
     # ── Loading ───────────────────────────────────────────────────────────────
 
     def _check_feature_hash(self) -> bool:
-        """Verify feature metadata matches current FEATURE_COLS. Backward-compat."""
+        """
+        Verify feature metadata. Stores the training-time feature list for
+        backward-compatible column slicing (FV2/FV3).
+        """
         meta_path = self.model_dir / "feature_metadata.joblib"
         if not meta_path.exists():
+            # Pre-hash model (trained before FV2/FV3). Reconstruct the
+            # original 20-feature set by dropping new features.
+            fv2v3 = {"syn_ratio", "fin_ratio", "rst_ratio", "ack_ratio", "psh_ratio",
+                     "port_is_web", "port_is_mail", "port_is_admin", "port_is_db", "port_is_dns"}
+            self._model_feature_cols = [c for c in FEATURE_COLS if c not in fv2v3]
             logger.warning(
-                "No feature metadata found (pre-hash model). "
-                "If FEATURE_COLS changed, re-train to avoid silent drift."
+                f"No feature metadata found (pre-hash model). "
+                f"Using reconstructed {len(self._model_feature_cols)}-col set."
             )
             return True
         try:
             meta = joblib.load(meta_path)
-            expected = hashlib.md5(":".join(FEATURE_COLS).encode()).hexdigest()
+            self._model_feature_cols = meta.get("feature_cols") or list(FEATURE_COLS)
             stored = meta.get("feature_hash")
-            if stored != expected:
-                logger.error(
-                    f"Feature hash mismatch! Expected {expected[:12]}..., "
-                    f"model has {stored[:12]}...\n"
-                    f"FEATURE_COLS changed since training. Re-train or revert FEATURE_COLS."
+            expected = hashlib.md5(":".join(FEATURE_COLS).encode()).hexdigest()
+            if stored and stored != expected:
+                logger.warning(
+                    f"Feature hash mismatch: expected {expected[:12]}..., "
+                    f"model has {stored[:12]}... "
+                    f"Using model's training-time feature set ({len(self._model_feature_cols)} cols). "
+                    f"Re-train to use all {len(FEATURE_COLS)} features."
                 )
-                return False
-            logger.info(f"Feature hash verified ({expected[:12]}...)")
+            else:
+                logger.info(f"Feature hash verified ({expected[:12]}...)")
             return True
         except Exception as e:
             logger.warning(f"Feature hash check failed: {e}")
@@ -270,7 +283,7 @@ class EnsembleInferenceEngine:
 
     def _validate_input(self, X: np.ndarray) -> None:
         """Check input quality before scoring. Warns but does not block."""
-        n_features = len(FEATURE_COLS)
+        n_features = len(self._model_feature_cols)
         if X.shape[1] != n_features:
             logger.error(
                 f"Feature count mismatch: expected {n_features}, got {X.shape[1]}. "
@@ -286,14 +299,18 @@ class EnsembleInferenceEngine:
     def predict(self, feature_df) -> List[dict]:
         """
         Score a DataFrame of flow features.
-        Returns list of result dicts with ensemble score, component scores,
-        label, and flow metadata.
+        Backward-compat: uses _model_feature_cols for column slicing.
         """
         if not self._rf_loaded and not self._ae_loaded:
             raise RuntimeError("Call load() before predict()")
 
+        use_cols = self._model_feature_cols
+        missing = [c for c in use_cols if c not in feature_df.columns]
+        if missing:
+            for c in missing:
+                feature_df[c] = 0.0
         try:
-            X = feature_df[FEATURE_COLS].to_numpy(dtype=np.float32)
+            X = feature_df[use_cols].to_numpy(dtype=np.float32)
         except KeyError as e:
             raise RuntimeError(
                 f"Missing feature column(s): {e}. "

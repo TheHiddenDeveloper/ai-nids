@@ -44,33 +44,37 @@ from ai_engine.trainer import train_random_forest, train_autoencoder
 from ai_engine.dataset import FEATURE_COLS, load_cicids2017
 
 def fetch_live_data(db_path="data/nids.db"):
-    """Extracts labeled flows from the local database."""
+    """TD3: label flows via high-confidence alerts (score>=0.95) within a 30s window."""
     if not Path(db_path).exists():
         logger.warning(f"Database {db_path} not found. Skipping live data.")
         return pd.DataFrame()
 
     conn = sqlite3.connect(db_path)
     try:
-        # Fetch flows and their potential alert labels
         query = """
-        SELECT f.raw_json, a.label as alert_label
+        SELECT DISTINCT f.raw_json,
+               CASE WHEN a.score >= 0.95 THEN a.label ELSE 'BENIGN' END as alert_label
         FROM flows f
         LEFT JOIN alerts a ON 
             f.src_ip = a.src_ip AND 
             f.dst_ip = a.dst_ip AND 
             f.dst_port = a.dst_port AND
-            ABS(f.timestamp - a.timestamp) < 5
+            ABS(f.timestamp - a.timestamp) < 30
         """
         df_raw = pd.read_sql_query(query, conn)
         
         live_features = []
+        seen = set()
         for _, row in df_raw.iterrows():
             try:
                 raw_data = json.loads(row['raw_json'])
-                # Re-calculate features using the same logic as our monitor
-                # Assuming the raw_json contains the feature-ready fields
                 feat = {k: raw_data.get(k, 0) for k in FEATURE_COLS}
                 feat['label'] = row['alert_label'] if row['alert_label'] else "BENIGN"
+                # Deduplicate by feature tuple
+                key = tuple(feat[k] for k in FEATURE_COLS)
+                if key in seen:
+                    continue
+                seen.add(key)
                 live_features.append(feat)
             except Exception:
                 continue
@@ -86,6 +90,10 @@ def main():
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--learning_rate", type=float, default=0.001)
     parser.add_argument("--smote_ratio", type=float, default=1.0)
+    parser.add_argument("--ae-threshold-percentile", type=float, default=95.0, help="EV3: percentile for AE anomaly threshold")
+    parser.add_argument("--use-bootstrap", action="store_true", help="Include synthetic seed data from bootstrap_data.py")
+    parser.add_argument("--use-pca", action="store_true", help="Apply PCA before AE training (FV1)")
+    parser.add_argument("--pca-components", type=int, default=12, help="Number of PCA components (FV1)")
     args = parser.parse_args()
 
     # 1. Load Research Data (CICIDS2017)
@@ -96,13 +104,25 @@ def main():
         logger.error(f"Failed to load research data: {e}. Check scripts/fetch_cicids.py")
         return
 
+    # 1b. Optionally load bootstrap seed data (TD2)
+    df_bootstrap = pd.DataFrame()
+    if args.use_bootstrap:
+        boot_path = Path("data/training_seed.csv")
+        if boot_path.exists():
+            df_bootstrap = pd.read_csv(boot_path)
+            logger.info(f"Loaded {len(df_bootstrap):,} bootstrap seed samples from {boot_path}")
+        else:
+            logger.warning(f"Bootstrap file not found at {boot_path}. Run scripts/bootstrap_data.py first.")
+
     # 2. Load Live Data
     df_live = fetch_live_data()
+    sources = [df_research]
+    if not df_bootstrap.empty:
+        sources.append(df_bootstrap)
     if not df_live.empty:
         logger.info(f"Loaded {len(df_live):,} live samples from DB.")
-        df_combined = pd.concat([df_research, df_live], ignore_index=True)
-    else:
-        df_combined = df_research
+        sources.append(df_live)
+    df_combined = pd.concat(sources, ignore_index=True)
 
     # 3. Preprocess
     df_combined["is_attack"] = (df_combined["label"].str.upper() != "BENIGN").astype(int)
@@ -134,7 +154,10 @@ def main():
         X_benign, X_test, y_test,
         epochs=args.epochs,
         batch_size=args.batch_size,
-        learning_rate=args.learning_rate
+        learning_rate=args.learning_rate,
+        threshold_percentile=args.ae_threshold_percentile,
+        use_pca=args.use_pca,
+        pca_components=args.pca_components,
     )
 
     # 6. Evaluate overall Ensemble performance on test set
@@ -174,7 +197,6 @@ def main():
     ensemble_scores = rf_w * rf_scores + ae_w * ae_scores
     y_pred = (ensemble_scores >= cls_thresh).astype(int)
     
-    # Calculate performance metrics
     accuracy = float(accuracy_score(y_test, y_pred))
     precision, recall, f1, _ = precision_recall_fscore_support(y_test, y_pred, average="binary", zero_division=0)
     precision = float(precision)
@@ -186,6 +208,35 @@ def main():
     logger.info(f"  Precision: {precision:.4f}")
     logger.info(f"  Recall:    {recall:.4f}")
     logger.info(f"  F1-Score:  {f1:.4f}")
+
+    # EV2: per-class metrics using detailed labels
+    try:
+        if "label" in df_combined.columns:
+            le_path = model_dir / "label_encoder.joblib"
+            if le_path.exists():
+                le = joblib.load(le_path)
+            else:
+                from sklearn.preprocessing import LabelEncoder
+                le = LabelEncoder()
+                le.fit(df_combined["label"])
+                joblib.dump(le, le_path)
+            y_true_labels = le.inverse_transform(y_test)
+            per_class = {}
+            from collections import defaultdict
+            class_correct = defaultdict(int)
+            class_total = defaultdict(int)
+            for true_lbl, pred_lbl in zip(y_true_labels, y_pred):
+                class_total[true_lbl] += 1
+                if (pred_lbl == 1 and true_lbl != "BENIGN") or (pred_lbl == 0 and true_lbl == "BENIGN"):
+                    class_correct[true_lbl] += 1
+                else:
+                    class_correct[true_lbl] += 0
+            for label_name in sorted(class_total):
+                acc = class_correct[label_name] / max(class_total[label_name], 1)
+                per_class[label_name] = round(acc, 4)
+            logger.info(f"Per-class accuracy: {per_class}")
+    except Exception as e:
+        logger.warning(f"EV2: per-class metrics unavailable: {e}")
 
     logger.success("--- MODELS TRAINED AND SAVED TO data/models/ ---")
 

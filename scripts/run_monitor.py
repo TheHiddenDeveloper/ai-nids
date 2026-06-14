@@ -21,6 +21,8 @@ import os
 import psutil
 import yaml
 import subprocess
+import queue
+import threading
 from pathlib import Path
 
 # ── Virtual Environment Check ────────────────────────────────────────────────
@@ -48,6 +50,7 @@ from monitor.capture import PacketCapture, PcapReplay
 from core.pipeline import NIDSPipeline
 from core.stats_tracker import StatsTracker
 from core.event_bus import EventBus
+from core.config_validator import validate_config
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -89,6 +92,7 @@ def configure_logging(verbose: bool):
         rotation="10 MB",
         retention="7 days",
         compression="gz",
+        serialize=True,
     )
 
 
@@ -114,11 +118,13 @@ def main():
     args = build_parser().parse_args()
     configure_logging(args.verbose)
     
-    # Load config.yaml for network settings
+    # Load and validate config.yaml
     config = {}
     if Path("config.yaml").exists():
         with open("config.yaml") as f:
             config = yaml.safe_load(f)
+        if not validate_config(config):
+            logger.warning("config.yaml validation failed — continuing with loaded values")
 
     model_dir = Path(args.model_dir)
     bus   = EventBus()
@@ -155,9 +161,6 @@ def main():
             f"uptime={snap['uptime_secs']}s"
         )
         sys.exit(0)
-
-    signal.signal(signal.SIGINT,  _shutdown)
-    signal.signal(signal.SIGTERM, _shutdown)
 
     # ── Dashboard Orchestration ───────────────────────────────────────────────
     ui_procs = []
@@ -223,14 +226,39 @@ def main():
         )
         return
 
-    # ── Live capture loop ─────────────────────────────────────────────────────
-    cap = PacketCapture(interface=args.interface, timeout=args.timeout)
+    # ── Live capture (O4: continuous background sniffing thread) ─────────────
+    pkt_queue: queue.Queue = queue.Queue(maxsize=10000)
+    cap = PacketCapture(interface=args.interface, timeout=0)  # 0 = infinite
+
+    def _sniff_loop():
+        while True:
+            try:
+                cap.start(callback=lambda pkt: pkt_queue.put(pkt))
+            except Exception as e:
+                logger.error(f"Capture error: {e}")
+                time.sleep(1)
+
+    sniff_thread = threading.Thread(target=_sniff_loop, daemon=True, name="nids-sniff")
+    sniff_thread.start()
+    logger.info(f"Continuous capture started on {args.interface} (background thread)")
+
     process = psutil.Process(os.getpid())
     window = 0
-    
+
     while True:
         window += 1
-        cap.start(callback=pipeline.ingest_packet)
+        # Consume packets from queue in batches
+        batch = []
+        deadline = time.monotonic() + args.timeout
+        while time.monotonic() < deadline:
+            try:
+                pkt = pkt_queue.get(timeout=min(1.0, deadline - time.monotonic()))
+                batch.append(pkt)
+            except queue.Empty:
+                break
+        for pkt in batch:
+            pipeline.ingest_packet(pkt)
+
         snap = stats.snapshot()
         
         # Broadcast system health & performance
@@ -240,7 +268,8 @@ def main():
                 "mem_rss_mb": process.memory_info().rss / (1024 * 1024),
                 "threads": process.num_threads(),
                 "active_flows": pipeline.active_flows,
-                "metrics": snap
+                "metrics": snap,
+                "queue_depth": pkt_queue.qsize(),
             }
             bus.publish("stats", health)
         except Exception as e:
@@ -251,7 +280,8 @@ def main():
             f"active_flows={pipeline.active_flows:>4} | "
             f"alerts/s={snap['alerts_per_sec']:.3f} | "
             f"flows/s={snap['flows_per_sec']:.2f} | "
-            f"total_alerts={snap['total_alerts']:,}"
+            f"total_alerts={snap['total_alerts']:,} | "
+            f"queue={pkt_queue.qsize():>4}"
         )
 
 

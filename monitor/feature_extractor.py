@@ -36,6 +36,26 @@ class FeatureExtractor:
             if col not in feature_df.columns:
                 feature_df[col] = 0
 
+        # FV3 — compute flag ratios from raw counts
+        for feat, count_col in [("syn_ratio", "syn_flag_count"), ("fin_ratio", "fin_flag_count"),
+                                ("rst_ratio", "rst_flag_count"), ("ack_ratio", "ack_flag_count"),
+                                ("psh_ratio", "psh_flag_count")]:
+            if count_col in feature_df.columns and "packet_count" in feature_df.columns:
+                feature_df[feat] = np.where(
+                    feature_df["packet_count"] > 0,
+                    feature_df[count_col] / feature_df["packet_count"],
+                    0.0
+                )
+
+        # FV2 — port category one-hot encoding
+        if "dst_port" in feature_df.columns:
+            port = feature_df["dst_port"]
+            feature_df["port_is_web"]   = port.isin({80, 443, 8080, 8443}).astype(float)
+            feature_df["port_is_mail"]  = port.isin({25, 110, 143, 587, 993, 995}).astype(float)
+            feature_df["port_is_admin"] = port.isin({22, 23, 21, 3389, 5900}).astype(float)
+            feature_df["port_is_db"]    = port.isin({3306, 5432, 27017, 6379}).astype(float)
+            feature_df["port_is_dns"]   = (port == 53).astype(float)
+
         feature_df = feature_df[FEATURE_COLS]
 
         # Replace inf / -inf, then NaN — warn if data quality is poor

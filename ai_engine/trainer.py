@@ -71,7 +71,7 @@ def train_random_forest(
     }, meta_path)
     logger.info(f"Saved model → {model_path}")
     logger.info(f"Saved scaler → {scaler_path}")
-    logger.info(f"Saved feature metadata (hash={feature_hash[:12]}...) → {meta_path}")
+    logger.info(f"Saved feature metadata (hash={feature_hash[:12]}..., {len(FEATURE_COLS)} cols) → {meta_path}")
 
     return rf, scaler
 
@@ -86,15 +86,15 @@ def train_autoencoder(
     batch_size: int = 128,
     learning_rate: float = 0.001,
     cal_ratio: float = 0.2,
+    use_pca: bool = False,
+    pca_components: int = 12,
 ) -> tuple:
     """
     Train an Autoencoder on BENIGN traffic only.
     Flags anomalies when reconstruction error exceeds the threshold.
 
-    Uses a separate calibration holdout (20% of test set) to select the
-    anomaly threshold, then evaluates on the remaining 80% holdout set.
-    This prevents test set leakage — the threshold is not fitted to the
-    same data used for evaluation.
+    FV1: when use_pca=True, applies PCA before AE to reduce multicollinearity.
+    Separate calibration holdout prevents test set leakage.
 
     Returns (autoencoder, threshold).
     """
@@ -102,6 +102,7 @@ def train_autoencoder(
         import tensorflow as tf
         from tensorflow import keras
         from sklearn.model_selection import train_test_split
+        from sklearn.decomposition import PCA
     except ImportError:
         logger.error("tensorflow not installed: pip install tensorflow")
         return None, None
@@ -119,8 +120,21 @@ def train_autoencoder(
 
     scaler = StandardScaler()
     X_train_s = scaler.fit_transform(X_train_benign)
+
+    # FV1: optional PCA
+    pca_model = None
+    if use_pca:
+        logger.info(f"Applying PCA ({pca_components} components) before AE...")
+        pca_model = PCA(n_components=pca_components, random_state=42)
+        X_train_s = pca_model.fit_transform(X_train_s)
+        joblib.dump(pca_model, Path(model_dir) / "ae_pca.joblib")
+        logger.info(f"PCA explained variance ratio: {pca_model.explained_variance_ratio_.sum():.3f}")
+
     X_cal_s = scaler.transform(X_cal)
     X_eval_s = scaler.transform(X_eval)
+    if use_pca and pca_model is not None:
+        X_cal_s = pca_model.transform(X_cal_s)
+        X_eval_s = pca_model.transform(X_eval_s)
 
     n_features = X_train_s.shape[1]
 
