@@ -43,7 +43,7 @@ fi
 echo "Node.js version: $(node --version)"
 echo "npm version: $(npm --version)"
 
-# 2c. Build the Next.js frontend
+# 2c. Build the Next.js frontend (static export served by FastAPI on port 8000)
 echo ""
 echo "Building Next.js frontend..."
 cd "$PROJECT_ROOT/frontend"
@@ -75,10 +75,9 @@ else
   echo "Detected Interface: $INTERFACE"
 fi
 
-# 4. Define target service files
+# 4. Define target service files (frontend is served by FastAPI at port 8000, no separate dashboard service)
 MONITOR_SVC="ai-nids-monitor.service"
 API_SVC="ai-nids-api.service"
-DASHBOARD_SVC="ai-nids-dashboard.service"
 
 # 5. Process and copy service files
 echo "Processing and copying service files to /etc/systemd/system/..."
@@ -103,7 +102,6 @@ process_service() {
 
 process_service "$MONITOR_SVC"
 process_service "$API_SVC"
-process_service "$DASHBOARD_SVC"
 
 # 6. Reload and restart
 echo "Reloading systemd daemon..."
@@ -112,16 +110,15 @@ sudo systemctl daemon-reload
 echo "Enabling services..."
 sudo systemctl enable "$MONITOR_SVC"
 sudo systemctl enable "$API_SVC"
-sudo systemctl enable "$DASHBOARD_SVC"
 
 echo "Restarting services..."
 sudo systemctl restart "$MONITOR_SVC"
 sudo systemctl restart "$API_SVC"
-sudo systemctl restart "$DASHBOARD_SVC"
 
 echo "✅ Deployment Complete!"
 echo ""
 echo "Check status:"
 echo "  sudo systemctl status $MONITOR_SVC"
 echo "  sudo systemctl status $API_SVC"
-echo "  sudo systemctl status $DASHBOARD_SVC"
+echo ""
+echo "Frontend is served by the API at http://localhost:8000 (no separate dashboard service needed)"

@@ -1,10 +1,11 @@
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
 import useSWR from 'swr';
+import { apiUrl } from "../lib/api";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 export function AnalyticsTab({ flows: initialFlows }: any) {
-  const { data: flows } = useSWR("http://localhost:8000/api/flows?limit=1500", fetcher, {
+  const { data: flows } = useSWR(apiUrl("/api/flows?limit=1500"), fetcher, {
     fallbackData: initialFlows,
     refreshInterval: 3000
   });

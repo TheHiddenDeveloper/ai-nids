@@ -1,10 +1,11 @@
 "use client";
 import { ScatterChart, Scatter, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import useSWR from 'swr';
+import { apiUrl } from "../lib/api";
 const fetcher = (url: string) => fetch(url).then(res => res.json());
 
 export function IncidentsTab() {
-  const { data: alerts } = useSWR("http://localhost:8000/api/alerts?limit=500", fetcher);
+  const { data: alerts } = useSWR(apiUrl("/api/alerts?limit=500"), fetcher);
   
   // Transform alerts with valid lat/lon into visual data points
   const geoData = (alerts || [])

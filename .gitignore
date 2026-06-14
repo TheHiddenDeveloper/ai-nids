@@ -24,6 +24,7 @@ data/alerts.jsonl
 data/nids.log
 data/nids.db
 data/*.csv
+data/nids.db
 
 # Jupyter
 .ipynb_checkpoints/

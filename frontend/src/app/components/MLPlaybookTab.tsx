@@ -28,6 +28,8 @@ import {
   Legend 
 } from "recharts";
 
+import { apiUrl } from "../lib/api";
+
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 export function MLPlaybookTab() {
@@ -44,25 +46,25 @@ export function MLPlaybookTab() {
   const terminalEndRef = useRef<HTMLDivElement>(null);
 
   // Fetch model versions registry
-  const { data: versions, error: versionsError } = useSWR("http://localhost:8000/api/models/versions", fetcher, {
+  const { data: versions, error: versionsError } = useSWR(apiUrl("/api/models/versions"), fetcher, {
     refreshInterval: 5000
   });
 
   // Fetch all jobs to find any active/running training jobs
-  const { data: jobs } = useSWR("http://localhost:8000/api/jobs", fetcher, {
+  const { data: jobs } = useSWR(apiUrl("/api/jobs"), fetcher, {
     refreshInterval: activeJobId ? 2000 : 5000
   });
 
   // Fetch metrics for the active job
   const { data: jobMetrics } = useSWR(
-    activeJobId ? `http://localhost:8000/api/jobs/${activeJobId}/metrics` : null,
+    activeJobId ? apiUrl(`/api/jobs/${activeJobId}/metrics`) : null,
     fetcher,
     { refreshInterval: 2000 }
   );
 
   // Fetch raw active job details for the terminal output
   const { data: activeJobDetails } = useSWR(
-    activeJobId ? `http://localhost:8000/api/jobs/${activeJobId}` : null,
+    activeJobId ? apiUrl(`/api/jobs/${activeJobId}`) : null,
     fetcher,
     { refreshInterval: 2000 }
   );
@@ -91,14 +93,14 @@ export function MLPlaybookTab() {
     if (activeJobDetails && activeJobDetails.status !== "running") {
       // If completed successfully, refresh registry
       if (activeJobDetails.status === "completed") {
-        mutate("http://localhost:8000/api/models/versions");
+        mutate(apiUrl("/api/models/versions"));
       }
     }
   }, [activeJobDetails, mutate]);
 
   const handleStartRetraining = async () => {
     try {
-      const res = await fetch("http://localhost:8000/api/models/retrain", {
+      const res = await fetch(apiUrl("/api/models/retrain"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -113,7 +115,7 @@ export function MLPlaybookTab() {
       if (data.job_id) {
         setActiveJobId(data.job_id);
         setDeploymentStatus(null);
-        mutate("http://localhost:8000/api/jobs");
+        mutate(apiUrl("/api/jobs"));
       }
     } catch (err) {
       console.error("Retrain launch error:", err);
@@ -124,7 +126,7 @@ export function MLPlaybookTab() {
     setDeployingVersion(version);
     setDeploymentStatus(null);
     try {
-      const res = await fetch("http://localhost:8000/api/models/deploy", {
+      const res = await fetch(apiUrl("/api/models/deploy"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ version })
@@ -135,7 +137,7 @@ export function MLPlaybookTab() {
           success: true,
           msg: `Version ${version} successfully deployed as system default. Monitor service restarted.`
         });
-        mutate("http://localhost:8000/api/models/versions");
+        mutate(apiUrl("/api/models/versions"));
       } else {
         setDeploymentStatus({
           success: false,

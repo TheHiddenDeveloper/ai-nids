@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "npm run build && npx serve@latest -s out -l 3000",
+    "start": "npx serve@latest -s out -l 3000",
     "lint": "eslint"
   },
   "dependencies": {
@@ -15,6 +15,7 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "recharts": "^3.8.1",
+    "serve": "^14.2.6",
     "swr": "^2.4.1",
     "tailwind-merge": "^3.5.0"
   },
@@ -25,7 +26,6 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.3",
-    "serve": "^14.2.6",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

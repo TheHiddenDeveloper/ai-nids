@@ -2,11 +2,12 @@
 import useSWR from "swr";
 import { Terminal, CheckCircle, XCircle, Loader2 } from "lucide-react";
 import { useState } from "react";
+import { apiUrl } from "../lib/api";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 export function TasksWidget() {
-  const { data: jobs } = useSWR("http://localhost:8000/api/jobs", fetcher, { refreshInterval: 2000 });
+  const { data: jobs } = useSWR(apiUrl("/api/jobs"), fetcher, { refreshInterval: 2000 });
   const [expandedJob, setExpandedJob] = useState<string | null>(null);
 
   if (!jobs || jobs.length === 0) return null;

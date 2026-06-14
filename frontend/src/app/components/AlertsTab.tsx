@@ -22,6 +22,8 @@ import {
   Cpu
 } from "lucide-react";
 
+import { apiUrl } from "../lib/api";
+
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 export function AlertsTab({ alerts }: any) {
@@ -31,7 +33,7 @@ export function AlertsTab({ alerts }: any) {
   const { mutate } = useSWRConfig();
 
   // Fetch the active blocked list to dynamically show current firewall status
-  const { data: blockedIPs } = useSWR("http://localhost:8000/api/settings/blocked_ips", fetcher);
+  const { data: blockedIPs } = useSWR(apiUrl("/api/settings/blocked_ips"), fetcher);
 
   if (!alerts) return <div className="text-slate-400 p-8 animate-pulse text-center">Loading Alert History...</div>;
 
@@ -50,14 +52,14 @@ export function AlertsTab({ alerts }: any) {
     if (event) event.stopPropagation();
     setMitigatingIP(ip);
     try {
-      const response = await fetch("http://localhost:8000/api/settings/firewall", {
+      const response = await fetch(apiUrl("/api/settings/firewall"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, ip })
       });
       if (response.ok) {
         // Mutate blocked_ips cache immediately to trigger a UI update
-        await mutate("http://localhost:8000/api/settings/blocked_ips");
+        await mutate(apiUrl("/api/settings/blocked_ips"));
       } else {
         alert(`Failed to execute firewall action: ${response.statusText}`);
       }

@@ -41,6 +41,10 @@ Central `config.yaml` (no `.env`). Change interface, Redis toggle, severity thre
 
 ## Frontend
 Next.js with `output: 'export'` (static site served by FastAPI at `/`). See `frontend/AGENTS.md` — this Next.js version has breaking changes from agent training data.
+- **API base URL**: Defined in `frontend/src/app/lib/api.ts` — change `API_BASE` there if the backend is on a different host/port.
+- **No separate dashboard service**: FastAPI serves the frontend at `/` on port 8000. The `ai-nids-dashboard.service` was removed as redundant.
+- **`npm start`** only serves the static export (no rebuild): `npx serve@latest -s out -l 3000`.
+- **Frontend build on deploy**: `scripts/deploy.sh` runs `npm run build` in `frontend/`. May need `sudo rm -rf frontend/.next frontend/out` if permissions get corrupted from prior root-owned builds.
 
 ## Sudo / WSL
 Live capture needs `cap_net_raw`. On WSL, use the full venv path with sudo:

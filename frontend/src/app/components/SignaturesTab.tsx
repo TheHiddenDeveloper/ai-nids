@@ -1,15 +1,16 @@
 "use client";
 import useSWR from "swr";
 import { Shield, ShieldAlert, ShieldCheck } from "lucide-react";
+import { apiUrl } from "../lib/api";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 export function SignaturesTab() {
-  const { data: rules, mutate } = useSWR("http://localhost:8000/api/signatures", fetcher);
+  const { data: rules, mutate } = useSWR(apiUrl("/api/signatures"), fetcher);
 
   const toggleRule = async (ruleId: string, enabled: boolean) => {
     try {
-      await fetch(`http://localhost:8000/api/signatures/${ruleId}/toggle`, {
+      await fetch(apiUrl(`/api/signatures/${ruleId}/toggle`), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ enabled })

@@ -1,14 +1,15 @@
 "use client";
 import useSWR from "swr";
+import { apiUrl } from "../lib/api";
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 export function SettingsTab() {
-  const { data: health } = useSWR("http://localhost:8000/api/settings/health", fetcher);
-  const { data: ips } = useSWR("http://localhost:8000/api/settings/blocked_ips", fetcher);
+  const { data: health } = useSWR(apiUrl("/api/settings/health"), fetcher);
+  const { data: ips } = useSWR(apiUrl("/api/settings/blocked_ips"), fetcher);
 
   const wipeSystem = async () => {
     if (!confirm("Are you sure? This deletes ALL alerts and logs!")) return;
-    await fetch("http://localhost:8000/api/settings/wipe", { method: "POST" });
+    await fetch(apiUrl("/api/settings/wipe"), { method: "POST" });
     alert("System Data Wiped Successfully.");
   };
 
@@ -30,10 +31,10 @@ export function SettingsTab() {
            </div>
         </div>
         <div className="mt-4 flex gap-3">
-          <button onClick={async () => { await fetch("http://localhost:8000/api/system/monitor/restart", { method: "POST" }); alert("Restart initiated."); }} className="bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium px-4 py-2 rounded-xl transition">
+          <button onClick={async () => { await fetch(apiUrl("/api/system/monitor/restart"), { method: "POST" }); alert("Restart initiated."); }} className="bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium px-4 py-2 rounded-xl transition">
             Restart Monitor Service
           </button>
-          <button onClick={async () => { await fetch("http://localhost:8000/api/models/retrain", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({precision: "high"}) }); alert("Retraining job started. Check Tasks Widget."); }} className="bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 border border-cyan-500/30 text-sm font-medium px-4 py-2 rounded-xl transition">
+          <button onClick={async () => { await fetch(apiUrl("/api/models/retrain"), { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({precision: "high"}) }); alert("Retraining job started. Check Tasks Widget."); }} className="bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 border border-cyan-500/30 text-sm font-medium px-4 py-2 rounded-xl transition">
             Retrain AI Models
           </button>
         </div>

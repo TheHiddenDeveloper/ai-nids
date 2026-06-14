@@ -12,6 +12,8 @@ import { SignaturesTab } from "./components/SignaturesTab";
 import { TasksWidget } from "./components/TasksWidget";
 import { MLPlaybookTab } from "./components/MLPlaybookTab";
 
+import { apiUrl } from "./lib/api";
+
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
 export default function Dashboard() {
@@ -23,9 +25,9 @@ export default function Dashboard() {
   const [sevFilter, setSevFilter] = useState(["high", "medium", "low"]);
 
   // Global Polling API
-  const { data: kpis } = useSWR("http://localhost:8000/api/kpis", fetcher, { refreshInterval: autoRefresh ? 3000 : 0 });
-  const { data: alertsRaw } = useSWR(`http://localhost:8000/api/alerts?limit=${historyLim}`, fetcher, { refreshInterval: autoRefresh ? 3000 : 0 });
-  const { data: flows } = useSWR("http://localhost:8000/api/flows?limit=1500", fetcher, { refreshInterval: autoRefresh ? 5000 : 0 });
+  const { data: kpis } = useSWR(apiUrl("/api/kpis"), fetcher, { refreshInterval: autoRefresh ? 3000 : 0 });
+  const { data: alertsRaw } = useSWR(apiUrl(`/api/alerts?limit=${historyLim}`), fetcher, { refreshInterval: autoRefresh ? 3000 : 0 });
+  const { data: flows } = useSWR(apiUrl("/api/flows?limit=1500"), fetcher, { refreshInterval: autoRefresh ? 5000 : 0 });
 
   // Apply visual filtering
   const alerts = alertsRaw?.filter((a: any) => sevFilter.includes(a.severity)) || [];
