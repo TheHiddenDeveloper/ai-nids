@@ -12,8 +12,37 @@ import requests
 import json
 import threading
 import time
+import yaml
+from pathlib import Path
 from loguru import logger
 from core.redis_client import get_redis_client
+
+_sync_lock = threading.Lock()
+
+
+class FeedTokenBucket:
+    """I2: simple token bucket rate limiter for upstream APIs."""
+
+    def __init__(self, rate: float, burst: int):
+        self._rate = rate
+        self._burst = burst
+        self._tokens = burst
+        self._last = time.monotonic()
+        self._lock = threading.Lock()
+
+    def acquire(self) -> float:
+        """Wait until a token is available. Returns wait time (0 if immediate)."""
+        with self._lock:
+            now = time.monotonic()
+            self._tokens = min(self._burst, self._tokens + (now - self._last) * self._rate)
+            self._last = now
+            if self._tokens >= 1:
+                self._tokens -= 1
+                return 0.0
+            deficit = 1.0 - self._tokens
+            self._tokens = 0.0
+            return deficit / self._rate
+
 
 class ThreatIntelManager:
     GEO_PREFIX = "nids:geo:cache"
@@ -21,21 +50,54 @@ class ThreatIntelManager:
     BLOCKLIST_KEY = "nids:blocklist"
     GEO_TTL = 86400 * 30  # 30 days
     REP_TTL = 3600 * 12   # 12 hours
-    
-    FEEDS = {
-        "emerging_threats": "https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt",
-        "feodo_tracker": "https://feodotracker.abuse.ch/downloads/ipblocklist.txt"
-    }
+
+    # I3: read feeds from config.yaml if available
+    _feeds = None
+
+    @classmethod
+    def _default_feeds(cls) -> dict:
+        if cls._feeds is not None:
+            return cls._feeds
+        try:
+            cfg_path = Path("config.yaml")
+            if cfg_path.exists():
+                with open(cfg_path) as f:
+                    cfg = yaml.safe_load(f)
+                cls._feeds = cfg.get("threat_intel", {}).get("feeds", {
+                    "emerging_threats": "https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt",
+                    "feodo_tracker": "https://feodotracker.abuse.ch/downloads/ipblocklist.txt",
+                })
+            else:
+                cls._feeds = {
+                    "emerging_threats": "https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt",
+                    "feodo_tracker": "https://feodotracker.abuse.ch/downloads/ipblocklist.txt",
+                }
+        except Exception:
+            cls._feeds = {
+                "emerging_threats": "https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt",
+                "feodo_tracker": "https://feodotracker.abuse.ch/downloads/ipblocklist.txt",
+            }
+        return cls._feeds
 
     def __init__(self):
         self.redis = get_redis_client()
-        # Start background sync if not already running recently
+        # I2: rate-limit geo-API to max 45 req/min (ip-api.com free tier)
+        self._geo_limiter = FeedTokenBucket(rate=0.75, burst=45)
         self._start_sync_thread()
 
     def _start_sync_thread(self):
-        """Runs the blocklist update in a background thread."""
-        thread = threading.Thread(target=self.sync_feeds, daemon=True)
+        """I1: module-level lock prevents duplicate sync threads."""
+        if not _sync_lock.acquire(blocking=False):
+            logger.debug("ThreatIntel: sync thread already running — skipping")
+            return
+        thread = threading.Thread(target=self._sync_wrapper, daemon=True)
         thread.start()
+
+    def _sync_wrapper(self):
+        try:
+            self.sync_feeds()
+        finally:
+            _sync_lock.release()
 
     def sync_feeds(self):
         """Downloads community feeds and populates Redis set."""
@@ -52,7 +114,8 @@ class ThreatIntelManager:
         logger.info("ThreatIntel: Syncing community reputation feeds...")
         malicious_ips = set()
 
-        for name, url in self.FEEDS.items():
+        feeds = self._default_feeds()
+        for name, url in feeds.items():
             try:
                 r = requests.get(url, timeout=10)
                 if r.status_code == 200:
@@ -123,7 +186,10 @@ class ThreatIntelManager:
         return data
 
     def _query_geo_api(self, ip: str) -> dict:
-        """Internal: Query free ip-api.com."""
+        """Internal: Query free ip-api.com (rate-limited by FeedTokenBucket)."""
+        wait = self._geo_limiter.acquire()
+        if wait > 0:
+            time.sleep(wait)
         try:
             r = requests.get(f"http://ip-api.com/json/{ip}", timeout=5)
             if r.status_code == 200:

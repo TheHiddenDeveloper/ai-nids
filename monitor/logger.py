@@ -39,6 +39,7 @@ class FlowLogger:
 
     def log(self, record: dict):
         self.conn.execute(_FLOW_INSERT, _flow_row(record, time.time()))
+        self.conn.commit()
 
     def log_batch(self, records: list):
         if not records:
@@ -46,6 +47,7 @@ class FlowLogger:
         timestamp = time.time()
         rows = [_flow_row(r, timestamp) for r in records]
         self.conn.executemany(_FLOW_INSERT, rows)
+        self.conn.commit()
 
 
 class AlertLogger:
@@ -80,6 +82,7 @@ class AlertLogger:
             "INSERT INTO alerts (timestamp, severity, src_ip, src_port, dst_ip, dst_port, score, label, signature_match, suppression_note, direction, incident_id, country, city, asn, threat_level, raw_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (timestamp, severity, src_ip, src_port, dst_ip, dst_port, score, label, sig_match, suppression_note, direction, incident_id, country, city, asn, threat_level, raw_json)
         )
+        self.conn.commit()
         
         logger.warning(
             f"[ALERT] {severity.upper()} | "

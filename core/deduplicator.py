@@ -32,7 +32,17 @@ class AlertDeduplicator:
         self._suppressed_counts: dict = {}
 
     def _make_key(self, alert: dict) -> str:
-        # Generate a fingerprint for the alert
+        """
+        Generate a fingerprint for the alert.
+
+        Design (D3): src_port is deliberately excluded. An attacker using
+        multiple source ports (e.g., port scan) from the same source IP to
+        the same destination would generate N distinct keys if src_port
+        were included, disabling suppression entirely. By grouping on
+        src_ip + dst_ip + dst_port + protocol + label, we suppress the
+        storm while still allowing different targets to produce distinct
+        alerts.
+        """
         return (
             f"{alert.get('_src_ip', '?')}|"
             f"{alert.get('_dst_ip', '?')}|"
@@ -47,26 +57,20 @@ class AlertDeduplicator:
         Returns False if a similar alert was seen within the window.
         """
         key = self._make_key(alert)
-        
+
         if self.redis:
             try:
                 redis_key = f"{self.REDIS_PREFIX}{key}"
-                # Set key ONLY if it doesn't exist (NX) with expiry (EX)
                 was_set = self.redis.set(redis_key, "seen", ex=self.window, nx=True)
-                
                 if not was_set:
-                    # Key exists -> we are in a suppression window
                     self.redis.incr(f"{redis_key}:count")
                     self.redis.expire(f"{redis_key}:count", self.window)
                     return False
                 else:
-                    # First time seeing this alert in this window
-                    self.redis.delete(f"{redis_key}:count")
                     return True
             except Exception as e:
                 logger.error(f"Deduplicator: Redis error, falling back to memory: {e}")
 
-        # Fallback to in-memory logic
         now = time.time()
         last = self._seen.get(key, 0)
 
@@ -81,7 +85,7 @@ class AlertDeduplicator:
     def suppression_note(self, alert: dict) -> Optional[str]:
         """Return a human-readable note about suppression count, if any."""
         key = self._make_key(alert)
-        
+
         count = 0
         if self.redis:
             try:
@@ -99,14 +103,19 @@ class AlertDeduplicator:
     def evict_expired(self) -> int:
         """Memory cleanup (only needed for in-memory mode)."""
         if self.redis:
-            return 0 # Redis handles this via TTL
-            
+            return 0
+
         now = time.time()
+        cutoff = now - self.window
+        # D2: evict stale suppression counts independently of _seen
+        stale_counts = [k for k in list(self._suppressed_counts) if k not in self._seen]
+        for k in stale_counts:
+            self._suppressed_counts.pop(k, None)
         expired = [k for k, t in self._seen.items() if now - t > self.window * 2]
         for k in expired:
             self._seen.pop(k, None)
             self._suppressed_counts.pop(k, None)
-        return len(expired)
+        return len(expired) + len(stale_counts)
 
     @property
     def active_keys(self) -> int:

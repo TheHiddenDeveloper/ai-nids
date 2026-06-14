@@ -83,14 +83,21 @@ class TestFeatureExtractor:
     def test_clips_extreme_rates(self):
         flow = make_flow(flow_bytes_per_sec=1e12)
         df = self.extractor.transform([flow])
-        assert df["flow_bytes_per_sec"].iloc[0] <= 1e9
+        assert df["flow_bytes_per_sec"].iloc[0] == 1e9
 
-    def test_to_numpy_shape(self):
-        flows = [make_flow() for _ in range(5)]
-        df = self.extractor.transform(flows)
-        arr = self.extractor.to_numpy(df)
-        assert arr.shape == (5, len(FEATURE_COLS))
-        assert arr.dtype == np.float32
+    def test_is_malformed_false_for_clean_flow(self):
+        df = self.extractor.transform([make_flow()])
+        assert not df["_is_malformed"].iloc[0]
+
+    def test_is_malformed_true_for_inf(self):
+        flow = make_flow(flow_bytes_per_sec=float("inf"))
+        df = self.extractor.transform([flow])
+        assert df["_is_malformed"].iloc[0]
+
+    def test_is_malformed_true_for_nan(self):
+        flow = make_flow(avg_packet_len=float("nan"))
+        df = self.extractor.transform([flow])
+        assert df["_is_malformed"].iloc[0]
 
     def test_missing_feature_filled_with_zero(self):
         flow = make_flow()

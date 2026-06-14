@@ -37,7 +37,7 @@ class SignatureChecker:
         self,
         rules_path: str = DEFAULT_RULES_PATH,
         watch: bool = False,
-        watch_interval: int = 10,
+        watch_interval: int = 5,
     ):
         self.rules_path = rules_path
         self._rules: List[Rule] = []

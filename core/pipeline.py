@@ -43,20 +43,22 @@ class NIDSPipeline:
 
     def __init__(
         self,
-        model_dir:      str = "data/models",
-        flow_log_path:  str = "data/flows.jsonl",
-        alert_log_path: str = "data/alerts.jsonl",
-        flow_timeout:   int = 20,
-        dedup_window:   int = 60,
-        use_signatures: bool = True,
-        use_model:      bool = True,
-        event_bus:      Optional[EventBus] = None,
-        stats_tracker:  Optional[StatsTracker] = None,
-        home_net:       Optional[list] = None
+        model_dir:       str = "data/models",
+        flow_log_path:   str = "data/flows.jsonl",
+        alert_log_path:  str = "data/alerts.jsonl",
+        flow_timeout:    int = 20,
+        dedup_window:    int = 60,
+        use_signatures:  bool = True,
+        use_model:       bool = True,
+        event_bus:       Optional[EventBus] = None,
+        stats_tracker:   Optional[StatsTracker] = None,
+        home_net:        Optional[list] = None,
+        max_active_flows: int = 50000,
     ):
         self.use_model      = use_model
         self.use_signatures = use_signatures
         self.home_net       = home_net or []
+        self.max_active_flows = max_active_flows  # L4
 
         # Core processing components
         self.aggregator  = FlowAggregator(flow_timeout=flow_timeout, home_net=self.home_net)
@@ -116,7 +118,7 @@ class NIDSPipeline:
     def stop(self):
         """Flush remaining flows and shut down."""
         self._stop_event.set()
-        self._intel_pool.shutdown(wait=False)
+        self._intel_pool.shutdown(wait=True, timeout=5)
         remaining = self.aggregator.flush_all()
         if remaining:
             self._process_flows(remaining)
@@ -129,11 +131,12 @@ class NIDSPipeline:
     def ingest_packet(self, pkt: dict) -> None:
         """
         Main entry point — called once per captured packet.
+        L4: drops packet if flow table exceeds max_active_flows (backpressure).
         """
+        if self.aggregator.active_flow_count >= self.max_active_flows:
+            return
         self.stats.record_packet()
-        completed_flows = self.aggregator.ingest(pkt)
-        if completed_flows:
-            self._process_flows(completed_flows)
+        self.aggregator.ingest(pkt)
 
     def _process_flows(self, flows: list) -> None:
         """Run feature extraction, inference and alerting on a batch of flows."""
@@ -141,9 +144,8 @@ class NIDSPipeline:
         if df is None:
             return
 
-        # Record flow stats
-        for flow in flows:
-            self.stats.record_flow(flow)
+        # L1: batch stats in a single lock acquisition
+        self.stats.record_flows_batch(flows)
 
         if self.engine:
             raw_results = self.engine.predict(df)
@@ -223,18 +225,22 @@ class NIDSPipeline:
         self.bus.publish("stats", self.stats.snapshot())
 
     def _maintenance_loop(self):
-        """Background: evict stale dedup keys every 60s."""
-        while not self._stop_event.wait(timeout=60):
+        """Background: evict stale flows, dedup keys, and incidents."""
+        while not self._stop_event.wait(timeout=10):
+            # L2: evict expired flows from the aggregator
+            expired_flows = self.aggregator.flush_expired()
+            if expired_flows:
+                logger.debug(f"Maintenance: evicted {len(expired_flows)} expired flows")
+                self._process_flows(expired_flows)
+
             evicted = self.deduplicator.evict_expired()
             if evicted:
                 logger.debug(f"Maintenance: evicted {evicted} stale dedup keys")
-            
-            # Evict stale incidents
+
             closed = self.correlator.evict_stale()
             if closed:
                 logger.info(f"Maintenance: closed {len(closed)} stale incidents")
                 for cid in closed:
-                    # Optional: publish 'incident_closed' event if needed
                     self.bus.publish("incident_update", {"id": cid, "status": "closed"})
 
     @property

@@ -15,6 +15,9 @@ from core.deduplicator import AlertDeduplicator
 from core.stats_tracker import StatsTracker
 
 
+_BUS_WAIT = 0.05  # B1: allow ThreadPoolExecutor to dispatch handlers
+
+
 def make_alert(src="1.2.3.4", dst="5.6.7.8", port=80, label="ATTACK", score=0.9, sev="high"):
     return {
         "_src_ip": src, "_dst_ip": dst, "_dst_port": port,
@@ -30,6 +33,7 @@ class TestEventBus:
         received = []
         bus.subscribe("alert", lambda p: received.append(p))
         bus.publish("alert", {"score": 0.9})
+        time.sleep(_BUS_WAIT)
         assert len(received) == 1
         assert received[0]["score"] == 0.9
 
@@ -39,12 +43,13 @@ class TestEventBus:
         bus.subscribe("flow", lambda p: log1.append(p))
         bus.subscribe("flow", lambda p: log2.append(p))
         bus.publish("flow", {"x": 1})
+        time.sleep(_BUS_WAIT)
         assert len(log1) == 1
         assert len(log2) == 1
 
     def test_unknown_topic_dropped(self):
         bus = EventBus()
-        bus.publish("nonexistent_topic", {"x": 1})  # should not raise
+        bus.publish("nonexistent_topic", {"x": 1})
 
     def test_handler_exception_does_not_crash_bus(self):
         bus = EventBus()
@@ -52,6 +57,7 @@ class TestEventBus:
         bus.subscribe("alert", lambda p: (_ for _ in ()).throw(RuntimeError("boom")))
         bus.subscribe("alert", lambda p: good.append(p))
         bus.publish("alert", {"score": 0.9})
+        time.sleep(_BUS_WAIT)
         assert len(good) == 1
 
     def test_subscriber_count(self):
@@ -64,6 +70,11 @@ class TestEventBus:
 # ── AlertDeduplicator ─────────────────────────────────────────────────────────
 
 class TestAlertDeduplicator:
+    @pytest.fixture(autouse=True)
+    def _no_redis(self, monkeypatch):
+        """Force in-memory fallback; tests assume no Redis."""
+        import core.deduplicator
+        monkeypatch.setattr(core.deduplicator, "get_redis_client", lambda: None)
     def test_first_alert_fires(self):
         dedup = AlertDeduplicator(suppress_window_secs=60)
         assert dedup.should_fire(make_alert()) is True

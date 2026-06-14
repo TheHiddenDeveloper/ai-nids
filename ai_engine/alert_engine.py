@@ -5,13 +5,17 @@ Applies severity thresholds to ML inference scores.
 Merges signature-based rules with ML results.
 """
 
+import json
 from typing import List, Optional
 from loguru import logger
 
 
+SEVERITY_THRESHOLDS = {"high": 0.92, "medium": 0.80, "low": 0.65}
+
+
 def _load_severity_thresholds() -> dict:
     """Read severity thresholds from config.yaml, fall back to defaults."""
-    defaults = {"high": 0.92, "medium": 0.80, "low": 0.65}
+    defaults = dict(SEVERITY_THRESHOLDS)
     try:
         import yaml
         with open("config.yaml") as f:
@@ -24,6 +28,14 @@ def _load_severity_thresholds() -> dict:
     return defaults
 
 
+def reload_severity_thresholds():
+    """A1: reload severity thresholds from config.yaml at runtime."""
+    global SEVERITY_THRESHOLDS
+    SEVERITY_THRESHOLDS = _load_severity_thresholds()
+    logger.debug(f"Severity thresholds reloaded: {SEVERITY_THRESHOLDS}")
+
+
+# Initial load
 SEVERITY_THRESHOLDS = _load_severity_thresholds()
 
 
@@ -52,23 +64,23 @@ def process_results(
         score = result.get("score", 0.0)
         severity = classify_severity(score)
 
-        # Check signature rules regardless of ML score
-        sig_match = None
+        # Check signature rules regardless of ML score (use check_with_metadata for severity — A2)
+        sig_matches = None
         if signature_checker:
-            sig_match = signature_checker.check(result)
+            sig_matches = signature_checker.check_with_metadata(result)
 
-        if severity is None and sig_match is None:
+        if severity is None and not sig_matches:
             continue
 
         alert = {**result}
         alert["severity"] = severity or "low"
-        # Preserve original model label for downstream comparison
         alert["model_label"] = alert.get("label", "BENIGN")
-        alert["label"]    = "ATTACK"  # If it's an alert, it's an attack/anomaly
+        alert["label"]    = "ATTACK"
 
-        if sig_match:
-            alert["signature_match"] = sig_match
-            alert["severity"] = "high"  # Signature hits always escalate to high
+        if sig_matches:
+            alert["signature_match"] = json.dumps(sig_matches)
+            # A2: use the first matching rule's severity, fall back to "high"
+            alert["severity"] = sig_matches[0].get("severity", "high")
 
         alerts.append(alert)
 

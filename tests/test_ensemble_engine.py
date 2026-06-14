@@ -121,7 +121,7 @@ class TestPredictContract:
         engine = EnsembleInferenceEngine(model_dir="/nonexistent")
         engine._rf_loaded = False
         engine._ae_loaded = True
-        engine._ae_score = lambda X: np.array([0.1, 0.9], dtype=np.float32)
+        engine._ae_score = lambda X, X_scaled=None: np.array([0.1, 0.9], dtype=np.float32)
         df = _make_df(n=2)
         results = engine.predict(df)
         assert len(results) == 2

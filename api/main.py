@@ -2,17 +2,19 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+import os
 import time
 import json
 import shutil
 import re
 
 from api.data import (
-    load_from_db, load_incidents, get_comparison_stats,
+    load_from_db, count_rows, load_incidents, get_comparison_stats,
     send_firewall_command
 )
 from core.redis_client import get_redis_client
@@ -22,9 +24,27 @@ from signatures.loader import load_rules
 import yaml
 import subprocess
 
+# H4: optional API key — set api.key in config.yaml to enforce
+API_KEY = None
+try:
+    with open("config.yaml") as f:
+        cfg = yaml.safe_load(f) or {}
+    API_KEY = cfg.get("api", {}).get("key") or None
+except Exception:
+    pass
+
 app = FastAPI(title="AI-NIDS API", version="1.0.0")
 
-# Enable CORS for local Next.js development
+if API_KEY:
+    @app.middleware("http")
+    async def api_key_middleware(request: Request, call_next):
+        if request.url.path.startswith("/api/"):
+            key = request.headers.get("X-API-Key")
+            if key != API_KEY:
+                return Response(status_code=403, content='{"detail":"Invalid or missing API key"}', media_type="application/json")
+        return await call_next(request)
+    print(f"API key authentication enabled")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -50,13 +70,8 @@ class FirewallAction(BaseModel):
 async def get_kpis():
     comp = get_comparison_stats()
     uptime_secs = time.time() - START_TIME
-    
-    # Calculate some basic metrics by peeking at db
-    flows = load_from_db("flows", limit=1)
-    alerts = load_from_db("alerts", limit=5000)
-    
-    total_alerts = len(alerts)
-    high_count = sum(1 for a in alerts if a.get("severity") in ("high", "medium"))
+    total_alerts = count_rows("alerts")
+    high_count = sum(1 for a in load_from_db("alerts", limit=5000) if a.get("severity") in ("high", "medium"))
     
     return {
         "uptime_seconds": uptime_secs,
@@ -66,12 +81,18 @@ async def get_kpis():
     }
 
 @app.get("/api/alerts")
-async def get_alerts(limit: int = 2000):
-    return load_from_db("alerts", limit=limit)
+async def get_alerts(limit: int = 200, offset: int = 0, response: Response = None):
+    data = load_from_db("alerts", limit=limit, offset=offset)
+    if response is not None:
+        response.headers["X-Total-Count"] = str(count_rows("alerts"))
+    return data
 
 @app.get("/api/flows")
-async def get_flows(limit: int = 5000):
-    return load_from_db("flows", limit=limit)
+async def get_flows(limit: int = 200, offset: int = 0, response: Response = None):
+    data = load_from_db("flows", limit=limit, offset=offset)
+    if response is not None:
+        response.headers["X-Total-Count"] = str(count_rows("flows"))
+    return data
 
 @app.get("/api/incidents")
 async def get_incidents(limit: int = 100):
@@ -132,11 +153,11 @@ async def get_single_job(job_id: str):
     return job
 
 class RetrainRequest(BaseModel):
-    precision: str = "high" # "standard" or "high"
-    epochs: int = 100
-    batch_size: int = 128
-    learning_rate: float = 0.001
-    smote_ratio: float = 1.0
+    precision: str = Field(default="high", pattern="^(standard|high)$")
+    epochs: int = Field(default=100, ge=1, le=1000)
+    batch_size: int = Field(default=128, ge=16, le=1024)
+    learning_rate: float = Field(default=0.001, gt=0, le=1.0)
+    smote_ratio: float = Field(default=1.0, ge=0.0, le=10.0)
 
 class DeployRequest(BaseModel):
     version: str
@@ -201,16 +222,17 @@ async def deploy_model_version(req: DeployRequest):
         "ae_threshold.joblib"
     ]
     
+    # H5: atomic copy — write to .tmp suffix, then rename (atomic on same fs)
     try:
         for art in artifacts:
             src = version_dir / art
-            dst = model_dir / art
-            if src.exists():
-                if src.is_dir():
-                    shutil.copytree(src, dst, dirs_exist_ok=True)
-                else:
-                    shutil.copy(src, dst)
+            if not src.exists():
+                continue
+            tmp = model_dir / (art + ".deploy_tmp")
+            shutil.copy2(src, tmp)
+            os.replace(tmp, model_dir / art)
     except Exception as e:
+        logger.error(f"Deploy copy failed: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to copy model artifacts: {e}")
         
     for entry in registry:
@@ -317,14 +339,15 @@ async def toggle_signature(rule_id: str, req: SignatureToggle):
 @app.post("/api/system/monitor/restart")
 async def restart_monitor():
     try:
-        # NOTE: This assumes the user running FastAPI has sudoers NOPASSWD for this service,
-        # or the API is running as root. If it fails, it will return 500.
         subprocess.run(["sudo", "systemctl", "restart", "ai-nids-monitor.service"], check=True)
         return {"status": "success"}
     except subprocess.CalledProcessError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to restart monitor: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to restart monitor: {e}. Ensure the API user has NOPASSWD sudo for systemctl restart ai-nids-monitor.service"
+        )
     except FileNotFoundError:
-        raise HTTPException(status_code=500, detail="systemctl command not found")
+        raise HTTPException(status_code=500, detail="systemctl command not found — is systemd installed?")
 
 # Serve the Next.js static export ONLY if it exists (for production)
 out_dir = Path("frontend/out")

@@ -19,6 +19,9 @@ class FeatureExtractor:
     Handles missing values, type casting, and infinite values.
     """
 
+    def __init__(self, clip_upper: float = 1e9):
+        self.clip_upper = clip_upper
+
     def transform(self, flows: List[dict]) -> Optional[pd.DataFrame]:
         if not flows:
             return None
@@ -40,16 +43,21 @@ class FeatureExtractor:
         if inf_mask.any():
             n_inf = int(inf_mask.sum())
             logger.warning(f"Replaced {n_inf} Inf value(s) with 0 — check flow aggregation")
-        nan_count = feature_df.isna().sum().sum()
+        feature_df.replace([np.inf, -np.inf], 0, inplace=True)
+        nan_mask = feature_df.isna().values
+        nan_count = int(nan_mask.sum())
         if nan_count:
             logger.warning(f"Replaced {nan_count} NaN value(s) with 0 — check feature extraction")
-        feature_df.replace([np.inf, -np.inf], 0, inplace=True)
         feature_df.fillna(0, inplace=True)
 
-        # Clip extreme outliers from malformed packets
+        # Mark malformed rows (had inf or nan — E2)
+        had_issues = inf_mask.any(axis=1) | nan_mask.any(axis=1)
+        feature_df["_is_malformed"] = had_issues
+
+        # Clip extreme outliers (E3: configurable via clip_upper)
         for col in ["flow_bytes_per_sec", "flow_packets_per_sec"]:
             if col in feature_df.columns:
-                feature_df[col] = feature_df[col].clip(upper=1e9)
+                feature_df[col] = feature_df[col].clip(upper=self.clip_upper)
 
         # Re-attach metadata
         for col in META_COLS:
@@ -58,7 +66,3 @@ class FeatureExtractor:
 
         logger.debug(f"Extracted features for {len(feature_df)} flows")
         return feature_df
-
-    def to_numpy(self, df: pd.DataFrame) -> np.ndarray:
-        """Return only ML-ready numeric columns as numpy array."""
-        return df[FEATURE_COLS].to_numpy(dtype=np.float32)

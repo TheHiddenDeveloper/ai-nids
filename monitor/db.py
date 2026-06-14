@@ -124,10 +124,7 @@ def clear_db_data():
             conn.execute("DELETE FROM flows")
             conn.execute("DELETE FROM alerts")
             conn.execute("DELETE FROM incidents")
-            # Vacuum to reclaim space
-            conn.execute("VACUUM")
         
-        # Also clear jsonl files and log file
         for filename in ["data/flows.jsonl", "data/alerts.jsonl", "data/nids.log"]:
             p = Path(filename)
             if p.exists():
@@ -136,4 +133,20 @@ def clear_db_data():
         return True
     except Exception as e:
         print(f"Failed to clear data: {e}")
+        return False
+
+
+def cleanup_old_data(retention_days: int = 30):
+    """S1: delete rows older than retention_days, then VACUUM."""
+    conn = get_db_connection()
+    cutoff = time.time() - retention_days * 86400
+    try:
+        with conn:
+            conn.execute("DELETE FROM flows WHERE timestamp < ?", (cutoff,))
+            conn.execute("DELETE FROM alerts WHERE timestamp < ?", (cutoff,))
+        # VACUUM outside the transaction to avoid blocking
+        conn.execute("VACUUM")
+        return True
+    except Exception as e:
+        print(f"Failed to cleanup old data: {e}")
         return False

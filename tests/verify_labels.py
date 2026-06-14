@@ -21,8 +21,8 @@ def test_signature_match_labels():
     
     # Mock signature checker that returns a match
     class MockChecker:
-        def check(self, flow):
-            return "Test Signature: Malicious activity detected"
+        def check_with_metadata(self, flow):
+            return [{"severity": "high", "name": "Test Signature", "description": "Malicious activity detected"}]
             
     alerts = process_results(results, signature_checker=MockChecker())
     

@@ -176,6 +176,10 @@ def train_autoencoder(
     autoencoder.save(ae_path)
     joblib.dump(scaler, Path(model_dir) / "ae_scaler.joblib")
     joblib.dump(threshold, Path(model_dir) / "ae_threshold.joblib")
+    # M4: save calibration MSE distribution for principled score normalisation
+    cal_data = {"mse_mean": float(np.mean(cal_mse)), "mse_std": float(np.std(cal_mse))}
+    joblib.dump(cal_data, Path(model_dir) / "ae_calibration.joblib")
     logger.info(f"Saved autoencoder → {ae_path}")
+    logger.info(f"Saved AE calibration (mse_mean={cal_data['mse_mean']:.6f}, mse_std={cal_data['mse_std']:.6f})")
 
     return autoencoder, threshold

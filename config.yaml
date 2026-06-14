@@ -46,11 +46,19 @@ alerts:
     high: 0.92
   log_path: "data/alerts.jsonl"
 
+api:
+  key: ""                  # set to an API key string to enable auth on all /api/ endpoints
+
 dashboard:
   api_host: "0.0.0.0"
   api_port: 8000
   frontend_port: 3000
   refresh_interval: 3         # seconds
+
+threat_intel:
+  feeds:
+    emerging_threats: "https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt"
+    feodo_tracker: "https://feodotracker.abuse.ch/downloads/ipblocklist.txt"
 
 logging:
   level: "INFO"

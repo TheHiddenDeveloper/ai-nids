@@ -15,7 +15,8 @@ Usage:
 
 import json
 import threading
-from typing import Callable, Dict, List
+import concurrent.futures
+from typing import Callable, Dict, List, Optional
 from loguru import logger
 from .redis_client import get_redis_client
 from .json_utils import NumpyEncoder
@@ -26,6 +27,9 @@ class EventBus:
     """
     Distributed Pub/Sub bus. If Redis is active, it broadcasts events
     across the network. Local subscribers are notified via a daemon thread.
+
+    B1: handlers are dispatched via a ThreadPoolExecutor so a slow handler
+    never blocks other subscribers or the publisher.
     """
 
     TOPICS = ("alert", "flow", "stats", "error")
@@ -38,7 +42,8 @@ class EventBus:
         self._stop_event = threading.Event()
         self._listener_thread: Optional[threading.Thread] = None
         self._pubsub = None
-        self._instance_id = str(uuid.uuid4())[:8] # Unique ID for this process
+        self._instance_id = str(uuid.uuid4())[:8]
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="nids-bus")
 
     def subscribe(self, topic: str, handler: Callable) -> None:
         if topic not in self.TOPICS:
@@ -78,14 +83,10 @@ class EventBus:
 
                 payload = data.get("payload")
                 
-                # Trigger local handlers for this topic
                 with self._lock:
                     handlers = list(self._handlers.get(topic, []))
                 for h in handlers:
-                    try:
-                        h(payload)
-                    except Exception as e:
-                        logger.error(f"EventBus: Local handler {h.__name__} failed: {e}")
+                    self._executor.submit(self._safe_dispatch, h, payload)
             except Exception as e:
                 logger.error(f"EventBus: Failed to process Redis message: {e}")
 
@@ -94,20 +95,15 @@ class EventBus:
             logger.warning(f"EventBus: unknown topic '{topic}' — dropping")
             return
 
-        # 1. Local handlers (fastest path)
+        # 1. Local handlers (async via executor — B1)
         with self._lock:
             handlers = list(self._handlers[topic])
-        
         for h in handlers:
-            try:
-                h(payload)
-            except Exception as exc:
-                logger.error(f"EventBus: Local handler {h.__name__} raised: {exc}")
+            self._executor.submit(self._safe_dispatch, h, payload)
 
         # 2. Redis broadcast (for external consumers)
         if self.redis:
             try:
-                # Wrap payload with sender metadata
                 envelope = {
                     "_sender": self._instance_id,
                     "payload": payload
@@ -115,6 +111,13 @@ class EventBus:
                 self.redis.publish(f"{self.REDIS_PREFIX}{topic}", json.dumps(envelope, cls=NumpyEncoder))
             except Exception as e:
                 logger.error(f"EventBus: Redis publish failed: {e}")
+
+    @staticmethod
+    def _safe_dispatch(handler: Callable, payload: dict):
+        try:
+            handler(payload)
+        except Exception as exc:
+            logger.error(f"EventBus: Handler {handler.__name__} raised: {exc}")
 
     def stop(self):
         self._stop_event.set()
@@ -126,6 +129,7 @@ class EventBus:
                 pass
         if self._listener_thread and self._listener_thread is not threading.current_thread():
             self._listener_thread.join(timeout=5)
+        self._executor.shutdown(wait=False)
 
     def subscriber_count(self, topic: str) -> int:
         return len(self._handlers.get(topic, []))

@@ -55,6 +55,8 @@ class EnsembleInferenceEngine:
         self._ae           = None
         self._ae_scaler    = None
         self._ae_threshold = None
+        self._ae_mse_mean  = 0.0
+        self._ae_mse_std   = 1.0
 
         self._rf_loaded = False
         self._ae_loaded = False
@@ -149,6 +151,7 @@ class EnsembleInferenceEngine:
         ae_path    = self.model_dir / "autoencoder.keras"
         sc_path    = self.model_dir / "ae_scaler.joblib"
         th_path    = self.model_dir / "ae_threshold.joblib"
+        cal_path   = self.model_dir / "ae_calibration.joblib"
         if not all(p.exists() for p in [ae_path, sc_path, th_path]):
             return False
         try:
@@ -156,6 +159,16 @@ class EnsembleInferenceEngine:
             self._ae           = tf.keras.models.load_model(str(ae_path))
             self._ae_scaler    = joblib.load(sc_path)
             self._ae_threshold = float(joblib.load(th_path))
+            # M4: load calibration MSE distribution (mean, std)
+            if cal_path.exists():
+                cal = joblib.load(cal_path)
+                self._ae_mse_mean = float(cal.get("mse_mean", 0.0))
+                self._ae_mse_std  = float(cal.get("mse_std", 1.0))
+                logger.info(f"AE calibration loaded (mse_mean={self._ae_mse_mean:.6f}, mse_std={self._ae_mse_std:.6f})")
+            else:
+                self._ae_mse_mean = 0.0
+                self._ae_mse_std  = 1.0
+                logger.warning("No AE calibration found — falling back to z-score defaults")
             logger.info(f"Autoencoder loaded from {ae_path} (threshold={self._ae_threshold:.6f})")
             return True
         except Exception as e:
@@ -169,23 +182,32 @@ class EnsembleInferenceEngine:
         X_s = self._scaler.transform(X)
         return self._rf.predict_proba(X_s)[:, 1]
 
-    def _ae_score(self, X: np.ndarray) -> np.ndarray:
+    def _ae_score(self, X: np.ndarray, X_scaled: np.ndarray = None) -> np.ndarray:
         """
         Return normalised anomaly score from AE, shape (n,).
-        Score = min(mse / (threshold * 3), 1.0) so it maps to [0, 1]
-        with threshold being ~0.33 on the scale.
+        Uses z-score relative to calibration-set MSE distribution (M4):
+          z = (mse - mse_mean) / mse_std
+        Clipped to [0, 1]; z=0 (benign mean) → 0, z=3 (3-sigma) → 1.0.
+        Falls back to mse / (threshold * 3) if no calibration data.
+        M2: accepts optional pre-scaled array to avoid double transform.
         """
-        X_s = self._ae_scaler.transform(X)
+        X_s = X_scaled if X_scaled is not None else (self._ae_scaler.transform(X) if self._ae_scaler is not None else X)
         reconstructions = self._ae.predict(X_s, verbose=0)
         mse = np.mean(np.power(X_s - reconstructions, 2), axis=1)
-        # Normalise: threshold maps to ~0.33, 3× threshold maps to 1.0
-        normalised = np.clip(mse / (self._ae_threshold * 3.0), 0.0, 1.0)
+        if self._ae_mse_std > 0 and self._ae_mse_mean != 0.0:
+            z = (mse - self._ae_mse_mean) / self._ae_mse_std
+            normalised = np.clip(z / 3.0, 0.0, 1.0)
+        else:
+            normalised = np.clip(mse / (self._ae_threshold * 3.0), 0.0, 1.0)
         return normalised
 
-    def _batch_explain(self, X: np.ndarray, rf_scores: np.ndarray, ae_scores: np.ndarray, ensemble_scores: np.ndarray) -> dict:
+    def _batch_explain(self, X: np.ndarray, rf_scores: np.ndarray, ae_scores: np.ndarray,
+                       ensemble_scores: np.ndarray, X_ae_scaled_full: np.ndarray = None) -> dict:
         """
         Precompute explanations for all anomalous flows in batch.
         Returns {row_index: {driver, features}} for flows with ens >= 0.5.
+        M2: accepts optional pre-scaled AE array to avoid double normalisation.
+        M3: returns error explanation instead of silent failure.
         """
         anomalous = np.where(ensemble_scores >= 0.5)[0]
         if len(anomalous) == 0:
@@ -199,9 +221,9 @@ class EnsembleInferenceEngine:
         if ae_driven and self._ae is not None and self._ae_scaler is not None:
             ae_idx = np.array(ae_driven)
             try:
-                X_ae_scaled = self._ae_scaler.transform(X[ae_idx])
-                reconstructions = self._ae.predict(X_ae_scaled, verbose=0)
-                recon_errors = np.power(X_ae_scaled - reconstructions, 2)
+                X_ae = X_ae_scaled_full[ae_idx] if X_ae_scaled_full is not None else self._ae_scaler.transform(X[ae_idx])
+                reconstructions = self._ae.predict(X_ae, verbose=0)
+                recon_errors = np.power(X_ae - reconstructions, 2)
 
                 for j, original_idx in enumerate(ae_driven):
                     errors = recon_errors[j]
@@ -218,6 +240,8 @@ class EnsembleInferenceEngine:
                     }
             except Exception as e:
                 logger.error(f"Batch AE explanation failed: {e}")
+                for idx in ae_driven:
+                    explanations[idx] = {"error": f"AE explanation failed: {e}"}
 
         if rf_driven and self._scaler is not None:
             rf_idx = np.array(rf_driven)
@@ -239,6 +263,8 @@ class EnsembleInferenceEngine:
                     }
             except Exception as e:
                 logger.error(f"Batch RF explanation failed: {e}")
+                for idx in rf_driven:
+                    explanations[idx] = {"error": f"RF explanation failed: {e}"}
 
         return explanations
 
@@ -266,11 +292,20 @@ class EnsembleInferenceEngine:
         if not self._rf_loaded and not self._ae_loaded:
             raise RuntimeError("Call load() before predict()")
 
-        X = feature_df[FEATURE_COLS].to_numpy(dtype=np.float32)
+        try:
+            X = feature_df[FEATURE_COLS].to_numpy(dtype=np.float32)
+        except KeyError as e:
+            raise RuntimeError(
+                f"Missing feature column(s): {e}. "
+                "FEATURE_COLS changed since model training or feature extraction. "
+                "Run feature hash check or re-train."
+            ) from e
         self._validate_input(X)
 
+        # M2: transform once, pass to both _ae_score and _batch_explain
+        X_ae_scaled = self._ae_scaler.transform(X) if (self._ae_loaded and self._ae_scaler is not None) else None
         rf_scores = self._rf_score(X)  if self._rf_loaded else np.zeros(len(X))
-        ae_scores = self._ae_score(X) if self._ae_loaded else np.zeros(len(X))
+        ae_scores = self._ae_score(X, X_scaled=X_ae_scaled) if self._ae_loaded else np.zeros(len(X))
 
         if self._rf_loaded and self._ae_loaded:
             rf_w, ae_w = self.rf_weight, self.ae_weight
@@ -281,7 +316,7 @@ class EnsembleInferenceEngine:
 
         ensemble_scores = np.clip(rf_w * rf_scores + ae_w * ae_scores, 0.0, 1.0)
 
-        explanations = self._batch_explain(X, rf_scores, ae_scores, ensemble_scores)
+        explanations = self._batch_explain(X, rf_scores, ae_scores, ensemble_scores, X_ae_scaled_full=X_ae_scaled)
 
         threshold = self._threshold
 

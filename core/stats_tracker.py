@@ -23,11 +23,28 @@ class StatsTracker:
     """
     Rolling statistics over the last `window_secs` seconds.
     Includes per-host score tracking for drift detection.
+
+    T1: baseline is re-calculated every `baseline_interval` benign scores
+        so it tracks long-term drift instead of freezing at first 50 samples.
+    T2: deque capacities are configurable via `score_capacity` / `host_score_capacity`.
+    T3: at most `max_hosts` unique hosts tracked in `_host_scores`; oldest evicted.
     """
 
-    def __init__(self, window_secs: int = 300):
+    def __init__(
+        self,
+        window_secs: int = 300,
+        score_capacity: int = 5000,
+        host_score_capacity: int = 500,
+        max_hosts: int = 1000,
+        baseline_interval: int = 1000,
+    ):
         self.window = window_secs
-        self._lock  = threading.Lock()
+        self._lock  = threading.RLock()
+
+        self._score_capacity = score_capacity
+        self._host_score_capacity = host_score_capacity
+        self._max_hosts = max_hosts
+        self._baseline_interval = baseline_interval
 
         # Timestamped event queues (pruned on snapshot)
         self._flow_times:  deque = deque()
@@ -45,20 +62,15 @@ class StatsTracker:
         self._severity_counts: defaultdict = defaultdict(int)
         self._protocol_counts: defaultdict = defaultdict(int)
 
-        # Score tracking for ALL flows (not just alerts)
-        self._all_scores: deque = deque(maxlen=5000)
+        self._all_scores: deque = deque(maxlen=self._score_capacity)
+        self._benign_scores: deque = deque(maxlen=self._score_capacity)
+        self._host_scores: dict = {}
 
-        # Benign score tracking (drift detection)
-        self._benign_scores: deque = deque(maxlen=5000)
-
-        # Per-host score tracking
-        self._host_scores: dict = defaultdict(lambda: deque(maxlen=500))
-
-        # Drift baseline (captured at first drift check)
+        # Drift baseline
         self._drift_baseline_mean: Optional[float] = None
         self._drift_baseline_std:  Optional[float] = None
+        self._samples_since_baseline: int = 0
 
-        # Startup time
         self._started_at = time.time()
 
     def record_packet(self):
@@ -73,6 +85,16 @@ class StatsTracker:
             proto = flow.get("dst_port", 0)
             self._protocol_counts[proto] += 1
 
+    def record_flows_batch(self, flows: list):
+        """L1: record multiple flows in a single lock acquisition."""
+        with self._lock:
+            now = time.time()
+            for flow in flows:
+                self._flow_times.append(now)
+                self._total_flows += 1
+                proto = flow.get("dst_port", 0)
+                self._protocol_counts[proto] += 1
+
     def record_flow_score(self, score: float, label: str, src_ip: str = None):
         """
         Record a score for ALL flows (not just alerts).
@@ -82,7 +104,19 @@ class StatsTracker:
             self._all_scores.append(score)
             if label == "BENIGN":
                 self._benign_scores.append(score)
+                # T1: re-baseline every baseline_interval samples
+                self._samples_since_baseline += 1
+                if self._samples_since_baseline >= self._baseline_interval and self._drift_baseline_mean is not None:
+                    scores = list(self._benign_scores)
+                    if len(scores) >= self._baseline_interval:
+                        self._drift_baseline_mean = self._safe_mean(scores)
+                        self._drift_baseline_std  = self._safe_stdev(scores)
+                    self._samples_since_baseline = 0
             if src_ip:
+                if src_ip not in self._host_scores:
+                    if len(self._host_scores) >= self._max_hosts:
+                        self._host_scores.pop(next(iter(self._host_scores)))
+                    self._host_scores[src_ip] = deque(maxlen=self._host_score_capacity)
                 self._host_scores[src_ip].append(score)
 
     def record_alert(self, alert: dict):
@@ -101,6 +135,7 @@ class StatsTracker:
             self._dst_ip_counts[dst]     += 1
             self._label_counts[label]    += 1
             self._severity_counts[severity] += 1
+            self._all_scores.append(score)
 
     def _prune(self, q: deque, cutoff: float):
         while q and q[0] < cutoff:
