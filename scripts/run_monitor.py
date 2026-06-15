@@ -21,7 +21,6 @@ import os
 import psutil
 import yaml
 import subprocess
-import queue
 import threading
 from pathlib import Path
 
@@ -226,14 +225,15 @@ def main():
         )
         return
 
-    # ── Live capture (O4: continuous background sniffing thread) ─────────────
-    pkt_queue: queue.Queue = queue.Queue(maxsize=10000)
-    cap = PacketCapture(interface=args.interface, timeout=0)  # 0 = infinite
+    # ── Live capture ──────────────────────────────────────────────────────────
+    # Run sniff in a background thread for continuous capture.
+    # Use a large timeout so the socket is periodically recycled cleanly.
+    cap = PacketCapture(interface=args.interface, timeout=3600)
 
     def _sniff_loop():
         while True:
             try:
-                cap.start(callback=lambda pkt: pkt_queue.put(pkt))
+                cap.start(callback=pipeline.ingest_packet)
             except Exception as e:
                 logger.error(f"Capture error: {e}")
                 time.sleep(1)
@@ -247,21 +247,10 @@ def main():
 
     while True:
         window += 1
-        # Consume packets from queue in batches
-        batch = []
-        deadline = time.monotonic() + args.timeout
-        while time.monotonic() < deadline:
-            try:
-                pkt = pkt_queue.get(timeout=min(1.0, deadline - time.monotonic()))
-                batch.append(pkt)
-            except queue.Empty:
-                break
-        for pkt in batch:
-            pipeline.ingest_packet(pkt)
+        time.sleep(args.timeout)  # wait for the batch window
 
         snap = stats.snapshot()
         
-        # Broadcast system health & performance
         try:
             health = {
                 "cpu_percent": process.cpu_percent(),
@@ -269,7 +258,6 @@ def main():
                 "threads": process.num_threads(),
                 "active_flows": pipeline.active_flows,
                 "metrics": snap,
-                "queue_depth": pkt_queue.qsize(),
             }
             bus.publish("stats", health)
         except Exception as e:
@@ -280,8 +268,7 @@ def main():
             f"active_flows={pipeline.active_flows:>4} | "
             f"alerts/s={snap['alerts_per_sec']:.3f} | "
             f"flows/s={snap['flows_per_sec']:.2f} | "
-            f"total_alerts={snap['total_alerts']:,} | "
-            f"queue={pkt_queue.qsize():>4}"
+            f"total_alerts={snap['total_alerts']:,}"
         )
 
 

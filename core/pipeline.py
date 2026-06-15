@@ -123,7 +123,7 @@ class NIDSPipeline:
     def stop(self):
         """Flush remaining flows and shut down."""
         self._stop_event.set()
-        self._intel_pool.shutdown(wait=True, timeout=5)
+        self._intel_pool.shutdown(wait=True)
         remaining = self.aggregator.flush_all()
         if remaining:
             self._process_flows(remaining)

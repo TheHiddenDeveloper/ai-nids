@@ -24,6 +24,7 @@ from api.jobs import start_job, get_job, list_jobs
 from signatures.loader import load_rules
 import yaml
 import subprocess
+from loguru import logger
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -42,8 +43,8 @@ except Exception:
 
 app = FastAPI(title="AI-NIDS API", version="1.0.0")
 
-# OP9: rate limiting — 100 req/min per IP
-limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
+# OP9: rate limiting per-endpoint (no default_limits — would throttle static frontend)
+limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 

@@ -26,7 +26,7 @@ class PacketCapture:
         cap.start(callback=my_handler)
     """
 
-    def __init__(self, interface: str = "eth0", timeout: int = 10, max_packets: int = 1000):
+    def __init__(self, interface: str = "eth0", timeout: Optional[int] = None, max_packets: int = 1000):
         self.interface = interface
         self.timeout = timeout
         self.max_packets = max_packets
