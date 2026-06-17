@@ -1,8 +1,24 @@
 """
-Feature Extractor
------------------
-Transforms raw flow feature dicts into a clean pandas DataFrame
-ready for ML inference or training data export.
+================================================================================
+FEATURE EXTRACTOR — Flow Dict → Clean DataFrame
+================================================================================
+Purpose:
+  Transforms a list of raw flow feature dicts (from FlowAggregator) into a
+  clean, NaN/Inf-free pandas DataFrame ready for ML inference or training.
+
+Usage:
+  extractor = FeatureExtractor(clip_upper=1e9)
+  df = extractor.transform(flows)  # returns DataFrame or None
+
+Processing steps:
+  1. OP4: pre-allocate numpy array instead of pd.DataFrame(list-of-dicts)
+     — faster and memory-efficient for high throughput
+  2. FV3: compute flag ratios (syn_ratio, fin_ratio, etc.) from raw counts
+  3. FV2: port category one-hot encoding (port_is_web, port_is_mail, etc.)
+  4. Replace Inf/NaN with 0.0; mark malformed rows (_is_malformed flag)
+  5. Clip extreme outliers (E3) for flow_bytes_per_sec, flow_packets_per_sec
+  6. Re-attach metadata columns (_src_ip, _dst_ip, etc.) from META_COLS
+================================================================================
 """
 
 import pandas as pd

@@ -1,6 +1,26 @@
 """
-Unit Tests — EnsembleInferenceEngine (no trained models required).
-Tests partial-load paths, error handling, and the predict contract.
+================================================================================
+TEST: ENSEMBLE ENGINE — Unit Tests (No Models Required)
+================================================================================
+Purpose:
+  Unit tests for EnsembleInferenceEngine that do NOT require trained models
+  on disk. Tests partial-load paths, error handling, configuration defaults,
+  and the predict() contract.
+
+Run:
+  pytest tests/test_ensemble_engine.py -v
+
+Test classes:
+  TestUnloadedEngine    — engine with /nonexistent model dir
+  TestConfigDefaults    — weight loading from config.yaml
+  TestPredictContract   — predict() returns correct keys, partial-load paths
+                          (RF-only, AE-only, unloaded raises RuntimeError)
+
+Design:
+  - Mocks _rf_score and _ae_score with lambda functions
+  - Uses _DummyScaler (identity transform) to avoid needing real scaler
+  - Covers edge cases: empty DataFrame, no anomalies, partial model loading
+================================================================================
 """
 
 import sys

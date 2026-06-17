@@ -1,12 +1,26 @@
 """
-Alert Deduplicator
-------------------
-Suppresses repeated alerts for the same (src_ip, dst_ip, dst_port) tuple
-within a configurable time window. Prevents alert storms from a single
-attacker flooding the logs.
+================================================================================
+ALERT DEDUPLICATOR — Storm Suppression
+================================================================================
+Purpose:
+  Suppresses repeated alerts for the same (src_ip, dst_ip, dst_port, protocol)
+  tuple within a configurable time window (default 60s). Without this, a SYN
+  flood from one IP generates thousands of alerts per minute, burying real events.
 
-Without this, a SYN flood from one IP can generate thousands of alerts
-per minute for the same target, burying real events.
+Usage:
+  dedup = AlertDeduplicator(suppress_window_secs=60)
+  if dedup.should_fire(alert):
+      ...  # first occurrence — forward it
+  note = dedup.suppression_note(alert)  # "N similar alert(s) suppressed"
+
+Design:
+  - D2: stale suppression counts evicted independently of _seen
+  - D3: src_port is deliberately EXCLUDED from the dedup key. An attacker using
+    multiple source ports (port scan) would generate N distinct keys if src_port
+    were included, disabling suppression entirely.
+  - Uses Redis with SET NX + TTL when available (persistent across restarts)
+  - Falls back to in-memory dict when Redis is down
+================================================================================
 """
 
 import time

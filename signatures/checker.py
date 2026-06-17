@@ -1,17 +1,25 @@
 """
-Signature Checker  (Step 7 — YAML-backed, hot-reloadable)
-----------------------------------------------------------
-Replaces the old hardcoded checker with one that reads from rules.yaml.
-
-Hot-reload (OP11):
-  - Uses watchdog inotify observer for instant reload on file change
-  - Falls back to polling if watchdog is unavailable
+================================================================================
+SIGNATURE CHECKER — YAML-Backed, Hot-Reloadable Rule Engine
+================================================================================
+Purpose:
+  Evaluates flow feature dicts against a set of YAML-defined signature rules
+  (signatures/rules.yaml). Supports hot-reload via watchdog inotify (with
+  polling fallback) so rules can be added/edited without restarting the monitor.
 
 Usage:
-    checker = SignatureChecker()                 # load once
-    checker = SignatureChecker(watch=True)       # auto-reload on file change
-    result  = checker.check(flow_dict)           # first matching rule, or None
-    results = checker.check_all(flow_dict)       # all matching rule names
+  checker = SignatureChecker(watch=True)
+  match = checker.check(flow_dict)               # first matching rule description
+  all_matches = checker.check_all(flow_dict)     # all matching descriptions
+  metadata = checker.check_with_metadata(flow_dict)  # full dicts for dashboard
+
+Design:
+  - OP11: uses watchdog inotify observer for instant reload on file change;
+    falls back to polling every `watch_interval` seconds
+  - reload() re-reads rules.yaml atomically under a lock
+  - check_with_metadata() returns rule_id, severity, tags for dashboard enrichment
+  - Thread-safe: all rule reads acquire an RLock
+================================================================================
 """
 
 import threading

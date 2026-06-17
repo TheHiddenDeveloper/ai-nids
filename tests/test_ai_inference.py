@@ -1,3 +1,24 @@
+"""
+================================================================================
+TEST: AI INFERENCE — Ensemble Engine Integration Test
+================================================================================
+Purpose:
+  Integration test for EnsembleInferenceEngine. Requires trained models in
+  data/models/. Creates benign and anomalous mock flows, runs inference, and
+  verifies the benign flow scores below threshold while anomalous scores above.
+
+Run:
+  pytest tests/test_ai_inference.py -v
+  python tests/test_ai_inference.py    # standalone mode
+
+Asserts:
+  - Load returns True with trained models present
+  - Engine.mode is not "unloaded"
+  - Benign flow (dst_port=443, normal params) → score < 0.5
+  - Anomalous flow (dst_port=6666, high bytes/sec) → score > 0.5
+================================================================================
+"""
+
 import sys
 import os
 import pandas as pd

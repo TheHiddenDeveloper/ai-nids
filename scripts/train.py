@@ -1,11 +1,35 @@
 """
-Universal AI Trainer
---------------------
-Unified command to train Random Forest and Deep Autoencoder models.
-Combines seed data with live network traffic from SQLite.
+================================================================================
+TRAIN — Unified Model Training (RF + Autoencoder)
+================================================================================
+Purpose:
+  Trains the full ensemble (Random Forest + Autoencoder) on CICIDS2017 research
+  data, optionally augmented with live data from SQLite and bootstrap seed data.
+  Saves models, scalers, thresholds, feature metadata, version registry, and
+  evaluates ensemble performance on a holdout test set.
+
+  Also produces per-class accuracy metrics (EV2) and registers the version in
+  data/models/registry.json.
 
 Usage:
-    python scripts/train.py --precision high
+  python scripts/train.py --precision high
+  python scripts/train.py --precision standard --epochs 5 --smote-ratio 0.5
+
+Phases:
+  1. Load CICIDS2017 research data (+ optional bootstrap + live data)
+  2. Preprocess: combine, clean NaN/Inf, train/test split
+  3. Train Random Forest (SMOTE-balanced)
+  4. Train Autoencoder on benign-only subset
+  5. Evaluate ensemble on test set (accuracy, precision, recall, F1, per-class)
+  6. Version and register in data/models/registry.json
+
+Design notes:
+  - TD2: optional bootstrap seed data (data/training_seed.csv)
+  - TD3: live data labeling via high-confidence alerts (score >= 0.95) within 30s window
+  - FV1: optional PCA before AE training (--use-pca, --pca-components)
+  - EV2: per-class accuracy using detailed LabelEncoder labels
+  - Model registry: each training run creates a version directory with all artifacts
+================================================================================
 """
 
 import argparse

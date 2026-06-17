@@ -1,4 +1,8 @@
-# Frontend — Next.js static export
+# Frontend Guide — Next.js Static Export
+# =============================================================================
+# Purpose: Next.js frontend with output: 'export' (static site).
+#          Served by FastAPI at / in production (port 8000).
+# =============================================================================
 
 - API base URL is in `src/app/lib/api.ts`. Change `API_BASE` for a different backend host/port.
 - All API URLs use the `apiUrl()` helper from that module.

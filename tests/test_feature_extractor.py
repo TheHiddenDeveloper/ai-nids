@@ -1,5 +1,15 @@
 """
-Unit Tests — FeatureExtractor
+================================================================================
+TEST: FEATURE EXTRACTOR — DataFrame Transformation
+================================================================================
+Purpose:
+  Unit tests for FeatureExtractor.transform(). Tests correct NaN/Inf handling,
+  FV2 port category one-hot encoding, FV3 flag ratio computation, column
+  alignment with FEATURE_COLS, and metadata preservation.
+
+Run:
+  pytest tests/test_feature_extractor.py -v
+================================================================================
 """
 
 import sys

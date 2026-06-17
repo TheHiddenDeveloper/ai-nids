@@ -1,16 +1,30 @@
 """
-Event Bus
----------
-Thread-safe queue that decouples the capture/inference thread from
-all consumers (dashboard, logger, stats tracker).
+================================================================================
+EVENT BUS — Pub/Sub Decoupling Layer
+================================================================================
+Purpose:
+  Decouples the capture/inference thread from all consumers (dashboard, logger,
+  stats tracker). Uses a ThreadPoolExecutor so slow handlers never block the
+  producer or other subscribers.
 
-Producer  : run_monitor.py  (calls bus.publish)
-Consumers : AlertLogger, StatsTracker, dashboard feed  (call bus.subscribe)
+Topics:
+  - "alert" : fired when a flow exceeds the severity threshold
+  - "flow"  : published for every scored flow (includes score + metadata)
+  - "stats" : periodic health snapshot
+  - "error" : error events
 
 Usage:
-    bus = EventBus()
-    bus.subscribe("alert", my_handler)
-    bus.publish("alert", alert_dict)
+  bus = EventBus()
+  bus.subscribe("alert", my_handler)
+  bus.publish("alert", alert_dict)
+
+Design:
+  - B1: handlers dispatched via ThreadPoolExecutor (max 4 workers)
+  - If Redis is active, broadcasts events across the network via Redis pub/sub
+  - Redis listener bridges remote events to local subscribers with sender-ID
+    dedup (events from the same instance are skipped to avoid double processing)
+  - Uses NumpyEncoder for safe serialization of numpy types to JSON
+================================================================================
 """
 
 import json

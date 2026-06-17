@@ -1,6 +1,28 @@
 """
-Canonical feature column definitions.
-Single source of truth — all other modules import from here.
+================================================================================
+FEATURE DEFINITIONS — Single Source of Truth
+================================================================================
+Purpose:
+  Defines FEATURE_COLS (30 float features for ML), META_COLS (string metadata
+  fields attached to each flow for routing/reporting), and HUMAN_FEATURE_NAMES
+  (display names for the dashboard).
+
+Design:
+  - FEATURE_COLS: the EXACT 30 columns used by Random Forest and Autoencoder.
+    All other modules (feature_extractor, dataset, trainer, ensemble, flows)
+    import from here — never duplicate the list.
+  - config.yaml:features.selected_features is a documentation-only mirror.
+    The code IGNORES it.
+  - Includes FV2 (port category one-hot) and FV3 (flag ratio) features.
+  - Assertions at import time verify FEATURE_COLS and HUMAN_FEATURE_NAMES
+    are in sync — drift causes an immediate crash rather than silent bugs.
+
+Adding a new feature:
+  1. Add to FEATURE_COLS
+  2. Add display name to HUMAN_FEATURE_NAMES
+  3. Add extraction logic to monitor/feature_extractor.py
+  4. Re-train models (FEATURE_COLS change invalidates old models)
+================================================================================
 """
 
 FEATURE_COLS = [

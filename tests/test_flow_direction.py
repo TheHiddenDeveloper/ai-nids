@@ -1,5 +1,19 @@
 """
-Unit Tests — Flow direction correction & IAT re-orientation bug regression.
+================================================================================
+TEST: FLOW DIRECTION — Reorientation & IAT Bug Regression
+================================================================================
+Purpose:
+  Tests flow direction correction via TCP SYN re-orientation and non-TCP
+  port-based reorientation. Regression tests for IAT reset bugs when a flow
+  gets re-oriented mid-stream.
+
+Run:
+  pytest tests/test_flow_direction.py -v
+
+Test classes:
+  TestFlowDirectionCorrection — TCP SYN reorient, non-TCP well-known port reorient
+  TestIATReorientationBug      — IAT reset/recalc after reorientation, no negative IAT
+================================================================================
 """
 
 import sys

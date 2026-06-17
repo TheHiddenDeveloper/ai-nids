@@ -1,8 +1,25 @@
 """
-FastAPI Data Utilities
-----------------------
-Handles DB connections, Redis interactions, and payload structuring
-for the REST API.
+================================================================================
+API DATA UTILITIES — DB + Redis Queries for REST Endpoints
+================================================================================
+Purpose:
+  Helper functions used by api/main.py endpoints to query SQLite and Redis
+  for alerts, flows, incidents, comparison stats, and firewall commands.
+
+Functions:
+  load_from_db(table, limit, offset)  — H3: fetch paginated records
+  count_rows(table)                   — H3: total count for pagination header
+  load_incidents(limit)               — fetch incident mapping from SQLite
+  get_comparison_stats()              — current_24h vs prev_24h metrics
+  send_firewall_command(action, ip)   — Redis pub/sub to FirewallEngine
+
+Design:
+  - SQLite reads are direct (no ORM), with raw_json column for JSON deserialization
+  - get_comparison_stats(): H2 — queries structured columns (severity) for
+    high/medium count, not raw_json parsing
+  - send_firewall_command() publishes to "nids:commands" Redis channel
+  - All functions handle missing DB gracefully (return empty lists/None)
+================================================================================
 """
 import sys
 from pathlib import Path

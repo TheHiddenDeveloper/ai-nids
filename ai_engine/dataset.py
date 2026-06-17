@@ -1,11 +1,26 @@
 """
-Dataset Loader — CICIDS2017
-----------------------------
-Loads the CICIDS2017 dataset, maps its columns to our internal feature
-schema, and splits into train/test sets.
+================================================================================
+DATASET LOADER — CICIDS2017 Research Data
+================================================================================
+Purpose:
+  Loads CICIDS2017 research CSV files from data/raw/cicids2017/, maps their
+  columns to our internal FEATURE_COLS schema, computes derived features
+  (FV2 port categories, FV3 flag ratios), cleans data, and splits into
+  train/test sets.
 
-Download: https://www.unb.ca/cic/datasets/ids-2017.html
-Place CSV files in: data/raw/cicids2017/
+  Dataset: https://www.unb.ca/cic/datasets/ids-2017.html
+  Download: python scripts/fetch_cicids.py
+
+Usage:
+  df = load_cicids2017("data/raw/cicids2017")
+  X_train, X_test, y_train, y_test, label_encoder = prepare_splits(df)
+
+Key mappers:
+  - CICIDS_COLUMN_MAP: maps CICIDS column names → internal FEATURE_COLS
+  - FV2: dst_port → one-hot category flags (web, mail, admin, db, dns)
+  - FV3: raw flag counts → syn_ratio, fin_ratio, etc. (normalized by packet_count)
+  - Label: anything not "BENIGN" → is_attack=1 (broad classification)
+================================================================================
 """
 
 import pandas as pd

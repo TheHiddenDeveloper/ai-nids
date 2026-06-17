@@ -1,4 +1,28 @@
 #!/usr/bin/env python3
+"""
+================================================================================
+TRAIN LOCAL MODEL — Directory-Based CSV Training
+================================================================================
+Purpose:
+  Trains Random Forest and/or Autoencoder on labeled CSV files found in a
+  directory. Scans subdirectories recursively for CSV files, maps their
+  columns using CICIDS_COLUMN_MAP, and trains models.
+
+Usage:
+  python scripts/train_local_model.py --data-dir data/raw/training_data --label-column label
+
+  # Train only RF
+  python scripts/train_local_model.py --model rf --data-dir data/raw/training_data
+  python scripts/train_local_model.py --model ae  # autoencoder only
+  python scripts/train_local_model.py --model both  # both models
+
+Design:
+  - Recursively finds all CSV files in data_dir
+  - Maps columns via CICIDS_COLUMN_MAP (compatible with CICIDS format)
+  - Splits train/test, cleans data, calls train_random_forest / train_autoencoder
+================================================================================
+"""
+
 import sys
 import argparse
 import pandas as pd

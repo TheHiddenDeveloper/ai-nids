@@ -1,8 +1,23 @@
 """
-Incident Correlation Engine
----------------------------
-Groups multiple alerts from the same source into high-level Incidents.
-Uses a sliding time window to track active attack sessions.
+================================================================================
+INCIDENT CORRELATOR — Alert-to-Incident Grouping
+================================================================================
+Purpose:
+  Groups multiple alerts from the same source IP into higher-level "Incidents".
+  An incident represents an active attack session (e.g., "SYN flood from 10.0.0.99").
+
+Usage:
+  correlator = IncidentCorrelator(inactivity_window=180)
+  incident_id = correlator.process_alert(alert_dict, intel_dict)
+
+Design:
+  - C1: grouping is controlled by `group_by` (list of alert fields), default ["_src_ip"]
+  - C2: at most `max_startup_incidents` resumed from SQLite on init (default 100)
+  - C3: only alerts with severity >= `min_severity` create incidents
+  - Incidents persist to SQLite (incidents table) with enrichment fields
+  - evict_stale() closes incidents that exceed inactivity_window (default 180s)
+  - Returns incident_id for DB linking; 0 if below min_severity threshold
+================================================================================
 """
 
 import time

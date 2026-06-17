@@ -1,3 +1,10 @@
+# ==============================================================================
+# AI-NIDS Configuration
+# ==============================================================================
+# Central configuration file (no .env). All runtime settings are here.
+# Changes take effect on restart unless noted otherwise.
+# ==============================================================================
+
 network:
   interface: "eth0"           # change to your NIC (ip a to check)
   home_net: ["192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"]
@@ -38,6 +45,9 @@ features:
     - port_is_db
     - port_is_dns
 
+# ------------------------------------------------------------------------------
+# Model (ML Ensemble)
+# ------------------------------------------------------------------------------
 model:
   type: "ensemble"            # random_forest | autoencoder | ensemble
   rf_n_estimators: 200
@@ -49,6 +59,9 @@ model:
   scaler_path: "data/models/scaler.joblib"
   label_encoder_path: "data/models/label_encoder.joblib"
 
+# ------------------------------------------------------------------------------
+# Alerts
+# ------------------------------------------------------------------------------
 alerts:
   severity_levels:
     low: 0.65
@@ -56,27 +69,45 @@ alerts:
     high: 0.92
   log_path: "data/alerts.jsonl"
 
+# ------------------------------------------------------------------------------
+# API (FastAPI Backend)
+# ------------------------------------------------------------------------------
 api:
   key: ""                  # set to an API key string to enable auth on all /api/ endpoints
 
+# ------------------------------------------------------------------------------
+# Dashboard (Next.js Frontend)
+# ------------------------------------------------------------------------------
 dashboard:
   api_host: "0.0.0.0"
   api_port: 8000
   frontend_port: 3000
   refresh_interval: 3         # seconds
 
+# ------------------------------------------------------------------------------
+# Threat Intelligence
+# ------------------------------------------------------------------------------
 threat_intel:
   feeds:
     emerging_threats: "https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt"
     feodo_tracker: "https://feodotracker.abuse.ch/downloads/ipblocklist.txt"
 
+# ------------------------------------------------------------------------------
+# Data Retention
+# ------------------------------------------------------------------------------
 retention:
   days: 30                # O1: delete flows/alerts older than this (0 = keep forever)
 
+# ------------------------------------------------------------------------------
+# Logging
+# ------------------------------------------------------------------------------
 logging:
   level: "INFO"
   log_file: "data/nids.log"
 
+# ------------------------------------------------------------------------------
+# Redis (Optional — set active: false for in-memory fallback)
+# ------------------------------------------------------------------------------
 redis:
   host: "localhost"
   port: 6379

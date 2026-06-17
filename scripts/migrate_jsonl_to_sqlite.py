@@ -1,7 +1,22 @@
 """
-Migration Script
-----------------
-Converts legacy AI-NIDS .jsonl data to the new SQLite database.
+================================================================================
+MIGRATE JSONL → SQLITE — Legacy Data Converter
+================================================================================
+Purpose:
+  Converts legacy JSONL log files (data/alerts.jsonl, data/flows.jsonl) to
+  the new SQLite database format. Useful when upgrading from older versions
+  of AI-NIDS that used flat JSONL files.
+
+Usage:
+  python scripts/migrate_jsonl_to_sqlite.py
+
+Design:
+  - Reads each line of the JSONL file as a JSON record
+  - Inserts into the corresponding SQLite table (alerts or flows)
+  - Deduplicates by raw_json hash to avoid duplicates on re-run
+  - Processes alerts.jsonl first, then flows.jsonl
+  - Optional --limit flag for testing with subset of data
+================================================================================
 """
 
 import json

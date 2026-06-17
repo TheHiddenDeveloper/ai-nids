@@ -1,3 +1,23 @@
+"""
+================================================================================
+TEST: DIRECTION — Flow Direction Classification
+================================================================================
+Purpose:
+  Standalone test for flow direction logic (inbound/outbound/internal/external)
+  based on HOME_NET configuration. Tests all four direction states and ensures
+  they are correctly classified on aggregated flows.
+
+Run:
+  python tests/test_direction.py    # standalone
+
+Test cases:
+  - Inbound: external source → internal destination
+  - Outbound: internal source → external destination
+  - Internal: both endpoints internal
+  - External: both endpoints external
+================================================================================
+"""
+
 import sys
 from pathlib import Path
 

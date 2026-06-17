@@ -1,14 +1,24 @@
 """
-Model Evaluation Script (EV1)
--------------------------------
-Loads the trained ensemble model and evaluates against labeled data
-(CICIDS2017 test split + optionally labeled live data).
+================================================================================
+EVALUATE — Model Performance Metrics (EV1)
+================================================================================
+Purpose:
+  Loads the trained ensemble model (EnsembleInferenceEngine) and evaluates it
+  against labeled CICIDS2017 data and optionally labeled live data from SQLite.
 
-Reports binary metrics and per-class accuracy.
+  Reports: accuracy, precision, recall, F1, AUC-ROC, confusion matrix, and
+  per-class classification report.
 
 Usage:
-    python scripts/evaluate.py
-    python scripts/evaluate.py --data-dir data/raw/cicids2017
+  python scripts/evaluate.py
+  python scripts/evaluate.py --data-dir data/raw/cicids2017
+  python scripts/evaluate.py --model-dir data/models --live-db data/nids.db
+
+Design:
+  - Uses EnsembleInferenceEngine.predict() for scoring (matches production path)
+  - Fills missing FEATURE_COLS that the engine expects with 0.0
+  - Per-class report via sklearn.metrics.classification_report
+================================================================================
 """
 
 import sys

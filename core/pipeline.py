@@ -1,12 +1,38 @@
 """
-Pipeline Orchestrator
----------------------
-Central Step 4 component. Wires together:
-  capture → flow aggregation → feature extraction →
-  inference → deduplication → alert engine →
-  event bus (→ loggers, stats, dashboard)
+================================================================================
+PIPELINE ORCHESTRATOR — Central Controller
+================================================================================
+Purpose:
+  The main loop that wires together the full detection chain:
+    capture → flow aggregation → feature extraction → ensemble inference →
+    deduplication → alert engine → event bus (→ loggers, stats, dashboard)
 
-Run this in a background thread or directly from run_monitor.py.
+Usage:
+  pipeline = NIDSPipeline(model_dir="data/models", ...)
+  pipeline.start()
+  pipeline.ingest_packet(pkt)   # called by capture thread for each packet
+  pipeline.stop()
+
+Architecture:
+  - Owns: FlowAggregator, FeatureExtractor, EnsembleInferenceEngine (or None),
+    SignatureChecker, AlertDeduplicator, IncidentCorrelator, ThreatIntelManager,
+    EventBus, StatsTracker
+  - ingest_packet() is the single entry point, called from capture thread
+  - Background maintenance thread evicts stale flows and dedup keys every 10s
+  - Threat intel enrichment runs in a ThreadPoolExecutor (max 4 workers)
+  - Data retention cleanup runs every ~100 maintenance cycles (~17 min)
+
+Modes:
+  - Full ensemble: RF + Autoencoder + signatures (default)
+  - Signature-only: --no-model flag, uses SignatureChecker only
+  - AI-only: signature_checker=None
+
+Design notes:
+  - L4: drops packets if active_flow_count >= max_active_flows (backpressure)
+  - L1: batch stats recording in single lock acquisition
+  - O1: data retention via cleanup_old_data()
+  - Processed flows are published to the event bus for real-time dashboard
+================================================================================
 """
 
 import time

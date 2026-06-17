@@ -1,8 +1,31 @@
 """
-Flow Aggregator
----------------
-Groups packets into bidirectional network flows (5-tuple key).
-Computes statistical features per flow for ML input.
+================================================================================
+FLOW AGGREGATOR — Packet → Bidirectional Flow
+================================================================================
+Purpose:
+  Groups raw packets into bidirectional network flows keyed by 5-tuple
+  (src_ip, dst_ip, src_port, dst_port, protocol — sorted so A→B == B→A).
+  Computes O(1) statistical features per flow for ML model input.
+
+Architecture:
+  - Flow class: maintains running statistics without storing individual packets.
+    Computes: duration, byte counts, packet counts, IAT stats, flag counts,
+    direction, min TTL.
+  - FlowAggregator: manages the active flow table (ShardedFlowStore).
+    Evicts expired flows via maintenance thread (flush_expired).
+
+Design:
+  - F1: batched Redis sync — accumulates deltas and pushes to Redis periodically
+    (every 5 packets) for distributed aggregation across instances
+  - F2: non-TCP re-orientation — if we see a packet to a well-known port (<1024)
+    from a different source, reorient the flow direction
+  - F6: monotonic clock for live capture (time.monotonic()), wall-clock for pcap
+    replay (explicit timestamp in packet dict)
+  - F7: protocol consistency check — warns if a flow sees mixed protocols
+  - Direction detection: inbound/outbound/internal/external based on HOME_NET
+  - L2: eviction handled exclusively by maintenance thread (not inline in ingest)
+  - to_features(): converts accumulated state → feature dict for ML inference
+================================================================================
 """
 
 import time

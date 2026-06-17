@@ -1,3 +1,34 @@
+"""
+================================================================================
+DATABASE LAYER — SQLite Auto-Init + Schema
+================================================================================
+Purpose:
+  Manages the SQLite database (data/nids.db) with auto-initialization on first
+  import. Schema includes flows, alerts, and incidents tables with automatic
+  migration support for new columns.
+
+Usage:
+  from monitor.db import get_db_connection, clear_db_data, cleanup_old_data
+  conn = get_db_connection()  # lazily initializes schema
+
+Tables:
+  flows     — timestamp, src_ip, dst_ip, dst_port, score, direction, raw_json
+  alerts    — timestamp, severity, src_ip/port, dst_ip/port, score, label,
+              signature_match, suppression_note, direction, incident_id,
+              country, city, asn, threat_level, raw_json
+  incidents — start/end_time, src_ip, alert_count, max_severity, status,
+              country, city, asn, threat_level, raw_data
+
+Design:
+  - Schema auto-creates on first get_db_connection() call (import-time init)
+  - WAL journal mode + NORMAL synchronous for concurrent read performance
+  - init_db() runs migrations: adds missing columns via ALTER TABLE IF NOT EXISTS
+  - clear_db_data(): wipes all tables + truncates JSONL log files (used by tests)
+  - cleanup_old_data(retention_days): S1 — DELETE rows older than retention, then VACUUM
+  - check_same_thread=False allows cross-thread connections from pipeline + API
+================================================================================
+"""
+
 import sqlite3
 import threading
 from pathlib import Path

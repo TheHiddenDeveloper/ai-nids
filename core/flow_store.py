@@ -1,3 +1,25 @@
+"""
+================================================================================
+SHARDED FLOW STORE — Concurrent Dictionary
+================================================================================
+Purpose:
+  Thread-safe dictionary with per-shard locks (16 shards by default) to reduce
+  lock contention under high-throughput packet capture. Each flow lookup/mutate
+  only locks 1 shard instead of the entire flow table.
+
+  Used by FlowAggregator to store active flows.
+
+Design:
+  - OP2: hash(key) % num_shards distributes entries
+  - Each shard has its own RLock — critical sections stay small (~1 shard)
+  - Supports: get, set, pop, contains, keys, values, items, clear
+  - pop_expired(key_fn): atomically remove entries where key_fn returns True
+  - iter_values_batched(batch_size): yield batches without holding locks
+  - max_flows is tracked but NOT enforced at the shard level (enforced in
+    NIDSPipeline.ingest_packet instead via backpressure)
+================================================================================
+"""
+
 from __future__ import annotations
 
 import threading

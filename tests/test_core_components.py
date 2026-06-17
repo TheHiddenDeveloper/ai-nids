@@ -1,6 +1,20 @@
 """
-Unit Tests — core/ components
-Tests EventBus, AlertDeduplicator, StatsTracker
+================================================================================
+TEST: CORE COMPONENTS — EventBus, AlertDeduplicator, StatsTracker
+================================================================================
+Purpose:
+  Unit tests for the three core infrastructure components:
+  - EventBus: pub/sub dispatch, handler isolation, Redis bridging
+  - AlertDeduplicator: suppression window, key fingerprinting, Redis/memory modes
+  - StatsTracker: rolling window stats, top IPs, drift detection
+
+Run:
+  pytest tests/test_core_components.py -v
+
+Design:
+  - _BUS_WAIT constant allows ThreadPoolExecutor to dispatch async handlers
+  - Uses make_alert() factory to create consistent test alert dicts
+================================================================================
 """
 
 import sys

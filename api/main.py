@@ -1,3 +1,41 @@
+"""
+================================================================================
+FASTAPI APPLICATION — REST API for AI-NIDS
+================================================================================
+Purpose:
+  FastAPI backend that powers the Next.js dashboard. Provides REST endpoints
+  for querying alerts, flows, incidents, model health, signatures, jobs, and
+  firewall control. Serves the Next.js static export at / when available.
+
+Endpoints:
+  GET  /api/kpis                  — comparison stats + uptime
+  GET  /api/alerts                — paginated alerts (limit, offset)
+  GET  /api/flows                 — paginated flows
+  GET  /api/incidents             — incident list
+  GET  /api/settings/health       — model + Redis health check
+  GET  /api/settings/blocked_ips  — currently blocked IPs
+  POST /api/settings/firewall     — block/unblock IP
+  POST /api/settings/wipe         — clear all data
+  GET  /api/jobs                  — list background jobs
+  GET  /api/jobs/{id}             — job status + output
+  GET  /api/jobs/{id}/metrics     — training metrics
+  POST /api/models/retrain        — trigger model retraining
+  GET  /api/models/versions       — model version registry
+  POST /api/models/deploy         — deploy specific version
+  GET  /api/signatures            — list all rules
+  POST /api/signatures/{id}/toggle — enable/disable rule
+  POST /api/system/monitor/restart — restart systemd service
+
+Design:
+  - H4 + O7: optional API key auth via X-API-Key header (loaded from config.yaml)
+  - OP9: rate limiting per-endpoint via slowapi (no default_limits to avoid
+    throttling the static frontend)
+  - Rate limits: KPIs/Alerts 100/min, Incidents 60/min, Retrain 2/min, Wipe 2/min
+  - H5: atomic deploy — write .tmp suffix then os.replace (atomic on same fs)
+  - Frontend served from frontend/out if exists (static export)
+================================================================================
+"""
+
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))

@@ -1,15 +1,31 @@
 """
-Stats Tracker
--------------
-Maintains rolling-window statistics for the live dashboard:
-  - Flows per second
-  - Alerts per second
-  - Top talker IPs
-  - Score distributions (per-host + global)
-  - Concept drift detection
+================================================================================
+STATS TRACKER — Rolling-Window Metrics + Drift Detection
+================================================================================
+Purpose:
+  Maintains rolling-window statistics for the live dashboard:
+  - Flows/sec, alerts/sec, total packets/flows/alerts
+  - Top talker IPs (src + dst)
+  - Score distributions (global + per-host)
+  - Concept drift detection (tracks benign score distribution over time)
 
-Thread-safe: all public methods acquire a lock.
-The dashboard reads a snapshot dict via .snapshot() — never the live state.
+Usage:
+  stats = StatsTracker(window_secs=300)
+  stats.record_packet()
+  stats.record_flow_score(score, label, src_ip)
+  stats.record_alert(alert)
+  snapshot = stats.snapshot()  # returns a plain dict, safe to pass across threads
+
+Design:
+  - Thread-safe: all public methods acquire an RLock
+  - Rolling window via timestamped deques, pruned on snapshot()
+  - T1: baseline re-calculated every `baseline_interval` benign scores
+    (tracks long-term drift, doesn't freeze at first 50 samples)
+  - T2: deque capacities configurable via score_capacity / host_score_capacity
+  - T3: at most `max_hosts` unique hosts tracked; oldest evicted
+  - L1: record_flows_batch() records multiple flows in a single lock acquisition
+  - Dashboard reads snapshot dict — never the live state
+================================================================================
 """
 
 import time

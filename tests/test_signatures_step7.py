@@ -1,7 +1,18 @@
 """
-Unit Tests — signatures/ Step 7
-Tests loader, Condition evaluation, Rule matching, SignatureChecker,
-and hot-reload behaviour.
+================================================================================
+TEST: SIGNATURES STEP 7 — Loader, Matcher, Hot-Reload
+================================================================================
+Purpose:
+  Comprehensive unit tests for the signature system:
+  - Condition.evaluate() — all operators (gt, lt, eq, in, etc.)
+  - Rule.matches() — AND logic, disabled rules
+  - load_rules() — YAML parsing, malformed rule skipping
+  - SignatureChecker — check(), check_all(), check_with_metadata()
+  - Hot-reload via watch mode (polling fallback)
+
+Run:
+  pytest tests/test_signatures_step7.py -v
+================================================================================
 """
 
 import sys

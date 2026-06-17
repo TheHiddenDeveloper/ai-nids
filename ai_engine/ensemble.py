@@ -1,20 +1,34 @@
 """
-Ensemble Inference Engine
--------------------------
-Combines Random Forest (supervised) and Autoencoder (unsupervised)
-into a single weighted attack probability score.
+================================================================================
+ENSEMBLE INFERENCE ENGINE — RF + Autoencoder Fusion
+================================================================================
+Purpose:
+  Combines Random Forest (supervised, known attack patterns) and Autoencoder
+  (unsupervised, anomaly detection on benign baseline) into a single weighted
+  attack probability score.
 
-RF catches known attack patterns from CICIDS2017 training data.
-Autoencoder catches zero-days — anything that reconstructs poorly
-from the benign-traffic baseline.
+  Final score = rf_weight * rf_score + ae_weight * ae_score
 
-Final score = (rf_weight * rf_score) + (ae_weight * ae_score)
+  Default weights from config.yaml: rf=0.65, ae=0.35
 
-Both scores are in [0, 1]. The ensemble is more robust than either
-model alone:
-  - RF alone: high accuracy on known attacks, blind to novel ones
-  - AE alone: catches anomalies but high false positive rate
-  - Ensemble: RF anchors known patterns, AE adds zero-day coverage
+Usage:
+  engine = EnsembleInferenceEngine(model_dir="data/models")
+  engine.load()
+  results = engine.predict(feature_df)
+
+Design:
+  - Config-driven weights loaded from config.yaml (can be overridden in ctor)
+  - OP6: tries ONNX inference first (faster), falls back to joblib/keras
+  - Feature hash verification: detects FEATURE_COLS drift between training
+    and inference time, slices to the model's training-time feature set
+  - M2: scales AE input once, passes to both _ae_score and _batch_explain
+    to avoid double normalisation
+  - M3: error explanation returned instead of silent failure on batch explain
+  - M4: principled z-score normalisation for AE anomaly scores (not raw MSE)
+  - Batch explain: for anomalous flows (ens >= 0.5), identifies which model
+    drove the decision (RF or AE) and the top-3 contributing features
+  - Confidence: distance from classification threshold (0=at threshold, 1=extreme)
+================================================================================
 """
 
 import hashlib

@@ -1,8 +1,35 @@
 """
-Model Trainer
--------------
-Trains a Random Forest classifier and/or Autoencoder on CICIDS2017.
-Saves trained models + scaler to data/models/.
+================================================================================
+MODEL TRAINER — RF + Autoencoder Training Pipeline
+================================================================================
+Purpose:
+  Trains the Random Forest classifier (supervised) and/or Autoencoder (unsupervised
+  anomaly detection) on CICIDS2017 research data. Saves trained models, scalers,
+  thresholds, and feature metadata to data/models/.
+
+Usage (via scripts/train.py):
+  python scripts/train.py --precision high --epochs 100
+
+Functions:
+  train_random_forest(X_train, y_train, X_test, y_test, ...)
+    - Applies SMOTE to handle class imbalance (attacks << benign)
+    - Saves: nids_model.joblib, scaler.joblib, feature_metadata.joblib
+    - OP6: exports to ONNX for faster inference (if skl2onnx available)
+
+  train_autoencoder(X_train_benign, X_test, y_test, ...)
+    - Trains on BENIGN traffic only (unsupervised anomaly detection)
+    - Calibration set (cal_ratio, default 0.2) held out for threshold selection
+    - FV1: optional PCA before AE (use_pca=True, pca_components=12)
+    - M4: saves calibration MSE distribution for principled z-score normalisation
+    - Saves: autoencoder.keras, ae_scaler.joblib, ae_threshold.joblib,
+      ae_calibration.joblib
+    - OP6: exports AE to ONNX for faster inference (if tf2onnx available)
+
+Architecture (AE):
+  Input → Dense(64) → Dropout → Dense(32) → Dropout → Dense(16) → Dropout →
+  Dense(8, latent) → Dense(16) → Dropout → Dense(32) → Dropout → Dense(64) →
+  Dropout → Dense(n_features, linear)
+================================================================================
 """
 
 import hashlib

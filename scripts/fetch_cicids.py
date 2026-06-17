@@ -1,7 +1,25 @@
 """
-Research Data Fetcher (Python)
--------------------------------
-Uses huggingface_hub API to download CICIDS2017 subsets.
+================================================================================
+FETCH CICIDS2017 — Research Data Downloader
+================================================================================
+Purpose:
+  Downloads CICIDS2017 research dataset CSV files from Hugging Face Hub
+  (repo: c01dsnap/CIC-IDS2017) into data/raw/cicids2017/.
+
+  These CSV files contain labeled network flow data used for training the
+  Random Forest and Autoencoder models.
+
+Usage:
+  python scripts/fetch_cicids.py
+
+Files downloaded:
+  Monday-WorkingHours, Tuesday-WorkingHours, Wednesday-workingHours,
+  Thursday (morning web attacks + afternoon infiltration),
+  Friday (morning, afternoon DDoS, afternoon port scan)
+
+Alternative:
+  bash scripts/fetch_cicids.sh  # uses wget instead of huggingface_hub
+================================================================================
 """
 
 import os

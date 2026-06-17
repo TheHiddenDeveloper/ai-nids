@@ -1,5 +1,19 @@
 """
-Shared JSON utilities — single source for numpy-safe encoding.
+================================================================================
+JSON UTILITIES — NumPy-Safe JSON Encoding
+================================================================================
+Purpose:
+  Single source for numpy-safe JSON serialization. The NumpyEncoder handles
+  numpy ints, floats, arrays, and bools — converting them to native Python
+  types before JSON encoding.
+
+  Used by EventBus for Redis pub/sub serialization and by Monitor loggers
+  for JSONL output.
+
+Usage:
+  from core.json_utils import NumpyEncoder
+  json.dumps(data, cls=NumpyEncoder)
+================================================================================
 """
 
 import json

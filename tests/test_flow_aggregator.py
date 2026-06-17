@@ -1,5 +1,20 @@
 """
-Unit Tests — FlowAggregator
+================================================================================
+TEST: FLOW AGGREGATOR — Packet Grouping + Feature Computation
+================================================================================
+Purpose:
+  Unit tests for Flow class (packet ingestion, statistics computation, flow
+  direction, re-orientation) and FlowAggregator (flow creation, expiry, flush).
+
+Run:
+  pytest tests/test_flow_aggregator.py -v
+
+Test classes:
+  TestFlowCreation      — basic packet ingestion, feature computation
+  TestFlowDirection     — inbound/outbound/internal/external classification
+  TestFlowReorientation — TCP SYN-based and non-TCP port-based reorientation
+  TestFlowAggregator    — ingest, flush_expired, flush_all, direction preservation
+================================================================================
 """
 
 import time

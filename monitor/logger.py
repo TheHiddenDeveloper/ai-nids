@@ -1,7 +1,28 @@
 """
-Flow Logger
------------
-Persists raw flow feature records and inference results to a SQLite database.
+================================================================================
+LOGGERS — SQLite Persistence for Flows + Alerts
+================================================================================
+Purpose:
+  Persists enriched flow records and confirmed alerts to the SQLite database.
+  These are the dual persistence layer alongside the event bus (Redis/pub-sub
+  for real-time consumers, SQLite for historical query by the API).
+
+Usage:
+  flow_logger = FlowLogger()
+  flow_logger.log(record) / log_batch(records)
+
+  alert_logger = AlertLogger()
+  alert_logger.log_alert(alert_dict)
+  recent_alerts = alert_logger.recent(n=50)
+
+Design:
+  - FlowLogger.log_batch() uses executemany for batch inserts (better perf)
+  - AlertLogger.log_alert() also prints a formatted log line via logger.warning
+  - Both use NumpyEncoder for safe JSON serialization of raw_json field
+  - alert_logger.recent() reads from SQLite descending by timestamp, returns
+    in chronological order (reversed for compatibility)
+  - No JSONL file writes here — JSONL path is deprecated (legacy only)
+================================================================================
 """
 
 import json

@@ -1,8 +1,24 @@
 """
-Inference Engine
-----------------
-Loads trained model + scaler and scores live flow feature vectors.
-Returns a probability score [0,1] and predicted label per flow.
+================================================================================
+INFERENCE ENGINE — Legacy Single-Model Scorer
+================================================================================
+Purpose:
+  Wraps a single trained sklearn model (Random Forest) for real-time flow
+  scoring. This is the LEGACY inference path — the EnsembleInferenceEngine
+  (ai_engine/ensemble.py) is the current production path.
+
+  This engine loads a single .joblib model + scaler, applies StandardScaler
+  transform, and returns P(attack) via predict_proba.
+
+Usage:
+  engine = InferenceEngine()
+  engine.load()
+  results = engine.predict(feature_df)
+
+Note:
+  This does NOT include autoencoder scoring, feature hash verification,
+  or explanation generation. Use EnsembleInferenceEngine for full capability.
+================================================================================
 """
 
 import joblib

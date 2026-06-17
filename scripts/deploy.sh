@@ -1,7 +1,32 @@
 #!/usr/bin/env bash
-# Deploy AI-NIDS Systemd Services Dynamically
-# This script intelligently finds the project root, current user, and virtualenv
-# to set up systemd services correctly regardless of deployment path.
+# ==============================================================================
+# DEPLOY — Systemd Service Installer
+# ==============================================================================
+# Purpose:
+#   Installs AI-NIDS as systemd services for production deployment. Dynamically
+#   detects the project root, current user, virtualenv, and network interface
+#   to set up services correctly regardless of deployment path.
+#
+# Services:
+#   ai-nids-monitor.service — continuous packet capture + inference pipeline
+#   ai-nids-api.service     — FastAPI backend serving the dashboard + REST API
+#
+# Steps:
+#   1. Detect project root, user, virtualenv, node/npm
+#   2. Build Next.js frontend (static export for FastAPI to serve)
+#   3. Detect active network interface (excludes lo/docker/bridge)
+#   4. Process systemd service templates (replace {{variables}})
+#   5. Copy to /etc/systemd/system/, daemon-reload, enable, restart
+#
+# Usage:
+#   sudo bash scripts/deploy.sh
+#
+# Design:
+#   - No separate dashboard service — FastAPI serves frontend at / on port 8000
+#   - ai-nids-dashboard.service was removed as redundant
+#   - Uses sed for template variable substitution
+#   - After deploy, check: sudo systemctl status ai-nids-monitor.service
+# ==============================================================================
 
 set -e
 

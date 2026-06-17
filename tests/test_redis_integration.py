@@ -1,3 +1,20 @@
+"""
+================================================================================
+TEST: REDIS INTEGRATION — Pub/Sub + Dedup Persistence
+================================================================================
+Purpose:
+  Tests Redis-backed EventBus pub/sub (cross-instance event broadcast) and
+  AlertDeduplicator persistence (Redis SET NX with TTL for alert suppression).
+
+Run:
+  python tests/test_redis_integration.py    # standalone (skips if Redis unavailable)
+
+DEPENDENCIES:
+  - Redis must be running
+  - Calls flushdb() which wipes Redis DB 0
+================================================================================
+"""
+
 import time
 import json
 import threading

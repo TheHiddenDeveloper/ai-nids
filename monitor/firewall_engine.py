@@ -1,3 +1,28 @@
+"""
+================================================================================
+FIREWALL ENGINE — iptables Block/Unblock via Redis Commands
+================================================================================
+Purpose:
+  Subscribes to the "nids:commands" Redis pub/sub channel and executes system
+  firewall actions (iptables DROP rules). Designed as a standalone background
+  service that requires sudo privileges.
+
+Usage (CLI):
+  python monitor/firewall_engine.py  # runs as a daemon
+
+  # Or send commands via Redis:
+  redis-cli PUBLISH nids:commands '{"action": "block", "ip": "1.2.3.4"}'
+
+Design:
+  - Safety filter: blocks internal/private IPs (RFC1918 + loopback) from being
+    blocked — block_ip() checks _is_safe() first
+  - Uses iptables -I INPUT (insert at top of chain) for block, -D for unblock
+  - Maintains blocked IP set in Redis (nids:blocked:ips) for query via API
+  - Commands received: {"action": "block"|"unblock", "ip": "x.x.x.x"}
+  - The API endpoint /api/settings/firewall sends commands via send_firewall_command()
+================================================================================
+"""
+
 import subprocess
 import json
 import ipaddress

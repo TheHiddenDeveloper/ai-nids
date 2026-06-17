@@ -1,8 +1,31 @@
 """
-Packet Capture Module
----------------------
-Captures raw packets from a network interface using scapy.
-Emits packet dictionaries for downstream processing.
+================================================================================
+PACKET CAPTURE — Live + Pcap Replay
+================================================================================
+Purpose:
+  Captures raw packets from a network interface using scapy (live mode) or
+  replays packets from a .pcap file. Emits packet dictionaries with extracted
+  fields for downstream processing in the pipeline.
+
+Usage:
+  # Live capture
+  cap = PacketCapture(interface="eth0")
+  cap.start(callback=my_packet_handler)  # blocks until timeout
+
+  # PCAP replay
+  replay = PcapReplay("data/raw/sample.pcap")
+  replay.play(callback=my_packet_handler)
+
+Packet dict structure:
+  {timestamp, src_ip, dst_ip, protocol, ip_len, ttl,
+   src_port, dst_port, tcp_flags, fin, syn, rst, psh, ack, urg}
+
+Supported: IPv4, IPv6, TCP, UDP, ICMP
+  - TCP: extracts all 6 flag bits (fin, syn, rst, psh, ack, urg)
+  - UDP: extracts src/dst ports only
+  - ICMP: protocol set to 1, src_port=icmp.type, dst_port=icmp.code
+  - Non-IP/IPv6 frames are silently dropped
+================================================================================
 """
 
 import time

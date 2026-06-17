@@ -1,8 +1,24 @@
 """
-Alert Engine
-------------
-Applies severity thresholds to ML inference scores.
-Merges signature-based rules with ML results.
+================================================================================
+ALERT ENGINE — Severity Classification + Signature Merge
+================================================================================
+Purpose:
+  Takes raw ensemble inference results (score, rf_score, ae_score, metadata),
+  applies configurable severity thresholds, optionally enriches with signature
+  rule matches, and produces final alert records.
+
+Usage:
+  alerts = process_results(inference_results, signature_checker=checker)
+
+Design:
+  - A1: severity thresholds (high=0.92, medium=0.80, low=0.65) are loaded from
+    config.yaml and reloadable at runtime via reload_severity_thresholds()
+  - A2: if a signature rule matches, the rule's severity overrides the ML-based
+    severity classification
+  - Alerts below the "low" threshold are dropped (score < 0.65 AND no sig match)
+  - Label is always set to "ATTACK" for any alerting record; model_label preserves
+    the original ML prediction
+================================================================================
 """
 
 import json

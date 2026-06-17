@@ -1,16 +1,42 @@
 #!/usr/bin/env python3
 """
-AI-NIDS Live Monitor
---------------------
-Captures live traffic or replays a pcap, runs the full inference
-pipeline, and writes alerts to disk and the event bus.
+================================================================================
+RUN MONITOR — Main Entry Point for Live/Replay Detection
+================================================================================
+Purpose:
+  Primary entry point for running the AI-NIDS detection pipeline. Two modes:
+  1. Live capture: sniffs packets from a network interface in a background
+     thread, processes through the full pipeline, reports stats every batch
+     window
+  2. Pcap replay: replays a pcap file through the pipeline (no live traffic,
+     no root required)
 
 Usage:
-    sudo python scripts/run_monitor.py --interface eth0
-    sudo python scripts/run_monitor.py --interface eth0 --timeout 60
-    python scripts/run_monitor.py --pcap data/raw/sample.pcap
-    sudo python scripts/run_monitor.py --interface eth0 --no-model
-    sudo python scripts/run_monitor.py --interface eth0 --verbose
+  sudo python scripts/run_monitor.py --interface eth0
+  sudo python scripts/run_monitor.py --interface eth0 --timeout 60
+  python scripts/run_monitor.py --pcap data/raw/sample.pcap
+  python scripts/run_monitor.py --interface eth0 --no-model
+  python scripts/run_monitor.py --interface eth0 --verbose
+
+Options:
+  --interface/-i       NIC for live capture (default: eth0)
+  --pcap              Replay .pcap instead of live capture
+  --timeout           Reporting interval in seconds (default: 30)
+  --flow-timeout      Seconds before flow considered complete (default: 20)
+  --no-model          Signature-only mode (no AI inference)
+  --dedup             Alert dedup window (default: 60s)
+  --model-dir         Path to trained models (default: data/models)
+  --dashboard         Launch Next.js + FastAPI alongside capture
+  --verbose           Debug-level logging
+
+Design:
+  - Runs PacketCapture in a background daemon thread for continuous capture
+  - NIDSPipeline handles flow aggregation, feature extraction, inference, alerts
+  - Stats reported in configurable batch windows via EventBus
+  - Graceful shutdown on SIGINT/SIGTERM: flushes pipeline, prints summary
+  - --dashboard flag launches FastAPI + Next.js as subprocesses
+  - Virtual environment check runs first to prevent "wrong python" errors
+================================================================================
 """
 
 import sys

@@ -1,19 +1,31 @@
 """
-Online Retrainer
-----------------
-Periodically retrains the Random Forest AND Autoencoder on a mix of:
-  - Confirmed alert records (labelled attack)
-  - Recent benign flow records (labelled benign)
+================================================================================
+ONLINE RETRAINER — Periodic Background Model Updates
+================================================================================
+Purpose:
+  Periodically retrains the Random Forest and Autoencoder on a mix of:
+  - Confirmed alert records from live data (labelled as attack)
+  - Recent benign flow records (labelled as benign)
+  Updates model registry with new version entries.
 
-RT1: AE is retrained on benign-only data alongside RF.
-RT2: registry.json updated with new version entry.
-RT3: 20% of online data held out for evaluation.
-RT4: data stratified across time chunks to avoid single-source overfit.
+  Can run as a one-shot script or as a background scheduler thread.
 
 Usage:
-    python scripts/retrain.py --once
-    python scripts/retrain.py --interval 3600   # retrain every hour
-    python scripts/retrain.py --min-new-alerts 50
+  python scripts/retrain.py --once
+  python scripts/retrain.py --interval 3600   # retrain every hour
+  python scripts/retrain.py --min-new-alerts 50
+
+Design:
+  - RT1: AE retrained on benign-only subset alongside RF
+  - RT2: registry.json updated with new version entry
+  - RT3: 20% of online data held out for evaluation
+  - RT4: data stratified across time chunks to avoid single-source overfit
+  - RT5: backs up existing models before overwriting
+  - Retrain history logged to data/models/retrain_history.jsonl
+  - O2: prefers SQLite over JSONL for data loading
+  - RetrainScheduler: background thread that checks and retrains on interval
+  - min_alert_score threshold (default 0.80) avoids FP contamination of training
+================================================================================
 """
 
 import sys

@@ -1,22 +1,33 @@
 #!/usr/bin/env python3
 """
-AI-NIDS Demo Mode
------------------
-Self-contained demonstration of the full detection pipeline.
-No root required, no live interface needed.
-
-What it does:
-  1. Generates a synthetic attack pcap (SYN flood, port scan, bad ports, C2)
-  2. Loads the trained model
-  3. Replays the pcap through the full pipeline
-  4. Displays a live terminal report as alerts fire
-  5. Prints a final summary with statistics
+================================================================================
+DEMO — Self-Contained End-to-End Demonstration
+================================================================================
+Purpose:
+  Self-contained demo of the full AI-NIDS detection pipeline. No root required,
+  no live interface needed. Generates synthetic attack traffic (SYN flood, port
+  scan, bad ports, C2 beacon), replays it through the pipeline, and displays
+  color-coded alerts in real-time with a final summary.
 
 Usage:
-    python scripts/demo.py
-    python scripts/demo.py --no-model          # signature-only mode
-    python scripts/demo.py --keep-pcap         # don't delete the generated pcap
-    python scripts/demo.py --pcap my.pcap      # use an existing pcap
+  python scripts/demo.py
+  python scripts/demo.py --no-model
+  python scripts/demo.py --keep-pcap
+  python scripts/demo.py --pcap my.pcap
+
+Steps:
+  1. Generate synthetic attack pcap (or use existing)
+  2. Initialise NIDSPipeline + EventBus + StatsTracker
+  3. Subscribe DemoReporter to flow/alert events
+  4. Replay pcap through pipeline
+  5. Print formatted summary (by severity, rule, top attacker IPs)
+
+Design:
+  - DemoReporter subscribes to event bus for real-time terminal output
+  - Color-coded output: RED=high, YELLOW=medium, CYAN=low
+  - Shorter dedup window (5s) for demo so all alerts display
+  - Temp pcap deleted after run unless --keep-pcap
+================================================================================
 """
 
 import sys

@@ -1,3 +1,35 @@
+"""
+================================================================================
+CONFIG VALIDATOR — Pydantic Schema for config.yaml
+================================================================================
+Purpose:
+  Defines the complete Pydantic schema for config.yaml validation. Every
+  section of the config has a corresponding BaseModel with type constraints,
+  defaults, and field validators.
+
+Usage:
+  from core.config_validator import validate_config
+  if not validate_config(raw_config_dict):
+      logger.warning("config.yaml failed validation")
+
+Sections:
+  NetworkConfig    — interface, home_net, capture_timeout, max_packets
+  FeaturesConfig   — flow_timeout, selected_features (docs mirror only)
+  ModelConfig      — type, rf/ae weights, threshold, paths
+  AlertsConfig     — severity_levels (low/medium/high thresholds)
+  DashboardConfig  — host, ports, refresh_interval
+  ThreatIntelConfig — feed URLs
+  RetentionConfig  — data retention days
+  LoggingConfig    — level (validated), log_file
+  RedisConfig      — host, port, db, active toggle
+  NIDSConfig       — top-level container for all sections
+
+Note:
+  This is for TYPE validation (values are in range). Business logic
+  validation (e.g., "home_net overlaps") is NOT done here.
+================================================================================
+"""
+
 from typing import Optional
 from pathlib import Path
 from loguru import logger

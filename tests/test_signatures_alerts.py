@@ -1,5 +1,18 @@
 """
-Unit Tests — SignatureChecker & AlertEngine
+================================================================================
+TEST: SIGNATURES + ALERTS — SignatureChecker & AlertEngine
+================================================================================
+Purpose:
+  Unit tests for SignatureChecker (rule matching) and AlertEngine (severity
+  classification, signature enrichment, alert filtering).
+
+Run:
+  pytest tests/test_signatures_alerts.py -v
+
+Test classes:
+  TestSignatureChecker — individual rule matching (SYN flood, port scan, etc.)
+  TestAlertEngine      — classify_severity thresholds, process_results merge logic
+================================================================================
 """
 
 import sys

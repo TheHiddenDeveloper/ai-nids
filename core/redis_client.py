@@ -1,3 +1,27 @@
+"""
+================================================================================
+REDIS CLIENT — Singleton Connection Manager
+================================================================================
+Purpose:
+  Centralized singleton for Redis connection management. Loads config from
+  config.yaml, creates a pooled connection with decode_responses=True (critical
+  for JSON pub/sub), and falls back gracefully when Redis is disabled or the
+  library is missing.
+
+Usage:
+  from core.redis_client import get_redis_client
+  client = get_redis_client()  # returns redis.Redis or None
+
+Design:
+  - RedisClient._instance is the singleton — get_client() returns it or creates
+  - Config loaded from config.yaml:redis section
+  - Returns None if redis.active=false, redis library not installed, or connect
+    fails — consumers handle None everywhere (in-memory fallback)
+  - socket_timeout=2s, retry_on_timeout=True for resilience
+  - decode_responses=True is essential for JSON serialization compatibility
+================================================================================
+"""
+
 import yaml
 from pathlib import Path
 from loguru import logger

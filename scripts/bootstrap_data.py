@@ -1,8 +1,27 @@
 """
-AI Data Bootstrapper
---------------------
-Generates a balanced seed dataset for training the NIDS models.
-This provides a starting point for the AI when local data is low.
+================================================================================
+BOOTSTRAP DATA — Synthetic Seed Dataset Generator (TD2)
+================================================================================
+Purpose:
+  Generates a balanced synthetic seed dataset for training when local data is
+  scarce. Creates 8,000 benign flows (web, DNS, common services) and 2,500
+  attack flows (SYN flood, port scan, DDoS, brute-force, C2 beacon, data exfil,
+  DNS tunneling) with realistic feature distributions.
+
+Usage:
+  python scripts/bootstrap_data.py         # generates data/training_seed.csv
+
+Design:
+  - Generates feature values mimicking real network behavior:
+    * Benign: random ports (80/443/53/random-high), normal byte counts, IATs
+    * SYN flood: high syn_count, low ack_count, short duration
+    * Port scan: high rst_count, low packet counts
+    * DDoS: high flow_bytes_per_sec, high packet_count
+    * C2: low packet count, very short duration, weird ports
+    * Exfil: high src_bytes, low dst_bytes, outbound direction
+  - Output CSV includes all FEATURE_COLS + label column
+  - Uses TF-IDF-like scaling for certain features (not actual TF-IDF)
+================================================================================
 """
 
 import pandas as pd

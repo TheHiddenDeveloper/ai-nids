@@ -1,11 +1,25 @@
 """
-Threat Intelligence Manager
----------------------------
-Handles GeoIP enrichment and suspicious IP reputation checks using community feeds.
-Feeds:
-- Emerging Threats (compromised hosts)
-- Feodo Tracker (botnets/C2)
-- ip-api.com (GeoIP)
+================================================================================
+THREAT INTELLIGENCE MANAGER — GeoIP + Reputation Feeds
+================================================================================
+Purpose:
+  Enriches alerts with GeoIP data (country, city, ISP, ASN) via ip-api.com
+  and checks IP reputation against community blocklists (Emerging Threats,
+  Feodo Tracker).
+
+Usage:
+  intel = ThreatIntelManager()
+  enrichment = intel.get_enrichment("1.2.3.4")
+  # Returns: {lat, lon, country, city, isp, asn, is_malicious, threat_level}
+
+Design:
+  - Syncs community feeds to Redis set on startup (or skips if recently synced)
+  - GeoIP data cached in Redis for 30 days, reputation for 12 hours
+  - I1: module-level lock prevents duplicate sync threads across instances
+  - I2: FeedTokenBucket rate-limits ip-api.com calls (45 req/min, free tier)
+  - I3: feeds loaded from config.yaml:threat_intel.feeds (with sensible defaults)
+  - Private IPs (192.168.*, 10.*, 127.0.0.1) return empty enrichment (no lookup)
+================================================================================
 """
 
 import requests
