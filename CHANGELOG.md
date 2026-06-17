@@ -1,6 +1,6 @@
 # Changelog
 
-All changes from project inception (`da0fb05`, Apr 1 2026) to present (`f5eb86e`, Jun 14 2026) — 41 commits, ~100 files, ~28k lines added.
+All changes from project inception (`da0fb05`, Apr 1 2026) to present (`239f84e`, Jun 17 2026) — 45 commits, ~160 files, ~30k lines added.
 
 ---
 
@@ -111,6 +111,17 @@ All changes from project inception (`da0fb05`, Apr 1 2026) to present (`f5eb86e`
 - **Model health diagnostics** — periodic checks for model file integrity, staleness, and prediction consistency
 
 ---
+
+### Jun 17 — Codebase Documentation & Pipeline Optimizations
+- **Comprehensive section headers** added to all 60 source files across every module (`core/`, `ai_engine/`, `monitor/`, `signatures/`, `api/`, `scripts/`, `tests/`, `frontend/`, `config.yaml`, systemd templates)
+  - Each header explains: purpose, usage, design decisions, and important gotchas
+  - Test files now document run commands, dependencies, and side effects (e.g., `flushdb()`, `clear_db_data()`)
+  - Config sections now clearly labelled with section dividers
+- **OP4: NumPy pre-allocation** in FeatureExtractor — replaces pandas list-of-dicts with pre-allocated `np.zeros` array for ~10x faster DataFrame construction
+- **OP2: ShardedFlowStore** — reduces lock contention in flow aggregation via hash-based sharding (16 shards, per-shard RLock)
+- **Removed packet queue** from capture pipeline — packets forwarded directly to aggregator, reducing latency and memory pressure
+- **Purged stale log files** and updated SQLite `.gitignore` patterns
+- Updated CHANGELOG boundary to 45 commits, ~160 files, ~30k lines total
 
 ### API Surface (final)
 
