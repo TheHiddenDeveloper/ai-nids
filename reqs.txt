@@ -59,6 +59,8 @@ python-dotenv==1.2.2
 PyYAML==6.0.3
 referencing==0.37.0
 requests==2.33.1
+slowapi>=0.1.0
+psutil>=7.0.0
 rich==14.3.3
 rpds-py==0.30.0
 scapy==2.7.0

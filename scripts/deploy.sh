@@ -42,7 +42,9 @@ if [ ! -d "$PROJECT_ROOT/scripts/systemd" ]; then
 fi
 
 echo "Project Root: $PROJECT_ROOT"
-echo "Current User: $USER"
+# When run with sudo, $USER is "root" — use $SUDO_USER for the real user
+REAL_USER="${SUDO_USER:-$USER}"
+echo "Current User: $REAL_USER"
 
 # 2. Check for virtual environment
 VENV_DIR="$PROJECT_ROOT/ai-venv"
@@ -117,7 +119,7 @@ process_service() {
   
   # Perform replacements while preserving absolute paths and handling spaces via {{PROJECT_ROOT}}
   sed "s|{{PROJECT_ROOT}}|$PROJECT_ROOT|g" "$src" | \
-  sed "s|{{USER}}|$USER|g" | \
+  sed "s|{{USER}}|$REAL_USER|g" | \
   sed "s|{{INTERFACE}}|$INTERFACE|g" > "$tmp_file"
   
   # Copy to final destination with sudo
