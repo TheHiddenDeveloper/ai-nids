@@ -22,9 +22,8 @@ data/processed/
 data/flows.jsonl
 data/alerts.jsonl
 data/nids.log
-data/nids.db
+data/nids.db*
 data/*.csv
-data/nids.db
 
 # Jupyter
 .ipynb_checkpoints/
@@ -47,4 +46,3 @@ Thumbs.db
 .coverage
 htmlcov/
 *.log.gz
-*.db-shm
