@@ -2,14 +2,14 @@
 
 import { useState, useEffect, useRef } from "react";
 import useSWR, { useSWRConfig } from "swr";
-import { 
-  Play, 
-  Sliders, 
-  Activity, 
-  Cpu, 
-  TrendingDown, 
-  Terminal as TerminalIcon, 
-  CheckCircle2, 
+import {
+  Play,
+  Sliders,
+  Activity,
+  Cpu,
+  TrendingDown,
+  Terminal as TerminalIcon,
+  CheckCircle2,
   AlertTriangle,
   RotateCw,
   Database,
@@ -17,20 +17,19 @@ import {
   Layers,
   Sparkles
 } from "lucide-react";
-import { 
-  LineChart, 
-  Line, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer, 
-  Legend 
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend
 } from "recharts";
 
-import { apiUrl } from "../lib/api";
-
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
+import type { Job, JobMetrics, ModelVersion, DeploymentStatus } from "../lib/types";
+import { apiUrl, fetcher } from "../lib/api";
 
 export function MLPlaybookTab() {
   const { mutate } = useSWRConfig();
@@ -42,57 +41,49 @@ export function MLPlaybookTab() {
 
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [deployingVersion, setDeployingVersion] = useState<string | null>(null);
-  const [deploymentStatus, setDeploymentStatus] = useState<{ success?: boolean; msg?: string } | null>(null);
+  const [deploymentStatus, setDeploymentStatus] = useState<DeploymentStatus | null>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
 
-  // Fetch model versions registry
-  const { data: versions, error: versionsError } = useSWR(apiUrl("/api/models/versions"), fetcher, {
+  const { data: versions, error: versionsError } = useSWR<ModelVersion[]>(apiUrl("/api/models/versions"), fetcher, {
     refreshInterval: 5000
   });
 
-  // Fetch all jobs to find any active/running training jobs
-  const { data: jobs } = useSWR(apiUrl("/api/jobs"), fetcher, {
+  const { data: jobs } = useSWR<Job[]>(apiUrl("/api/jobs"), fetcher, {
     refreshInterval: activeJobId ? 2000 : 5000
   });
 
-  // Fetch metrics for the active job
-  const { data: jobMetrics } = useSWR(
+  const { data: jobMetrics } = useSWR<JobMetrics>(
     activeJobId ? apiUrl(`/api/jobs/${activeJobId}/metrics`) : null,
     fetcher,
     { refreshInterval: 2000 }
   );
 
-  // Fetch raw active job details for the terminal output
-  const { data: activeJobDetails } = useSWR(
+  const { data: activeJobDetails } = useSWR<Job>(
     activeJobId ? apiUrl(`/api/jobs/${activeJobId}`) : null,
     fetcher,
     { refreshInterval: 2000 }
   );
 
-  // Auto-scroll terminal to bottom when new logs arrive
   useEffect(() => {
     if (terminalEndRef.current) {
       terminalEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [activeJobDetails?.output]);
 
-  // Find if there is an existing running training job on load
   useEffect(() => {
     if (jobs && jobs.length > 0) {
       const runningTrainJob = jobs.find(
-        (j: any) => j.status === "running" && j.name.includes("Model Retraining")
+        (j: Job) => j.status === "Running" && j.name.includes("Model Retraining")
       );
       if (runningTrainJob) {
-        setActiveJobId(runningTrainJob.id);
+        setActiveJobId(runningTrainJob.job_id);
       }
     }
   }, [jobs]);
 
-  // Determine if active job is finished
   useEffect(() => {
-    if (activeJobDetails && activeJobDetails.status !== "running") {
-      // If completed successfully, refresh registry
-      if (activeJobDetails.status === "completed") {
+    if (activeJobDetails && activeJobDetails.status !== "Running") {
+      if (activeJobDetails.status === "Completed") {
         mutate(apiUrl("/api/models/versions"));
       }
     }
@@ -117,8 +108,8 @@ export function MLPlaybookTab() {
         setDeploymentStatus(null);
         mutate(apiUrl("/api/jobs"));
       }
-    } catch (err) {
-      console.error("Retrain launch error:", err);
+    } catch {
+      console.error("Retrain launch error:");
     }
   };
 
@@ -144,7 +135,7 @@ export function MLPlaybookTab() {
           msg: data.detail || "Deployment failed."
         });
       }
-    } catch (err) {
+    } catch {
       setDeploymentStatus({
         success: false,
         msg: "Network error during model deployment."
@@ -154,11 +145,10 @@ export function MLPlaybookTab() {
     }
   };
 
-  const deployedModel = versions?.find((v: any) => v.status === "deployed");
+  const deployedModel = versions?.find((v: ModelVersion) => v.status === "deployed");
 
   return (
-    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-8">
-      {/* Tab Header */}
+    <div className="space-y-8">
       <div className="flex justify-between items-start">
         <div>
           <h2 className="text-2xl font-bold text-white flex items-center gap-2">
@@ -179,9 +169,9 @@ export function MLPlaybookTab() {
       </div>
 
       {deploymentStatus && (
-        <div className={`p-4 rounded-xl border flex items-start gap-3 animate-in slide-in-from-top-2 duration-300 ${
-          deploymentStatus.success 
-            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
+        <div className={`p-4 rounded-xl border flex items-start gap-3 duration-300 ${
+          deploymentStatus.success
+            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
             : 'bg-rose-500/10 border-rose-500/20 text-rose-400'
         }`}>
           {deploymentStatus.success ? <CheckCircle2 className="w-5 h-5 flex-shrink-0" /> : <AlertTriangle className="w-5 h-5 flex-shrink-0" />}
@@ -192,10 +182,8 @@ export function MLPlaybookTab() {
         </div>
       )}
 
-      {/* Retraining Configuration and Monitor Section */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
-        {/* Playbook hyperparameter options */}
+
         <div className="lg:col-span-5 bg-slate-900 border border-white/5 rounded-3xl p-6 shadow-2xl space-y-6">
           <div className="flex items-center gap-2 border-b border-white/5 pb-4">
             <Sliders className="w-5 h-5 text-emerald-400" />
@@ -203,7 +191,6 @@ export function MLPlaybookTab() {
           </div>
 
           <div className="space-y-5">
-            {/* Precision Selector */}
             <div className="space-y-2">
               <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Training Density</label>
               <div className="grid grid-cols-2 gap-3">
@@ -234,7 +221,6 @@ export function MLPlaybookTab() {
               </div>
             </div>
 
-            {/* SMOTE Balance ratio slider */}
             <div className="space-y-2">
               <div className="flex justify-between text-xs font-bold text-slate-400 uppercase tracking-wider">
                 <span>Dataset Balancing (SMOTE)</span>
@@ -253,7 +239,6 @@ export function MLPlaybookTab() {
               <p className="text-[10px] text-slate-500 leading-normal">Determines synthetic generation density for anomaly under-samples in the training corpus.</p>
             </div>
 
-            {/* Epochs Slider */}
             <div className="space-y-2">
               <div className="flex justify-between text-xs font-bold text-slate-400 uppercase tracking-wider">
                 <span>Training Epochs</span>
@@ -271,7 +256,6 @@ export function MLPlaybookTab() {
               />
             </div>
 
-            {/* Batch Size Selection */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Batch Size</label>
@@ -289,7 +273,6 @@ export function MLPlaybookTab() {
                 </select>
               </div>
 
-              {/* Learning Rate Selection */}
               <div className="space-y-2">
                 <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Learning Rate</label>
                 <select
@@ -328,7 +311,6 @@ export function MLPlaybookTab() {
           </button>
         </div>
 
-        {/* Live retrain monitoring console */}
         <div className="lg:col-span-7 bg-slate-900 border border-white/5 rounded-3xl p-6 shadow-2xl flex flex-col justify-between min-h-[480px]">
           <div className="flex items-center justify-between border-b border-white/5 pb-4">
             <div className="flex items-center gap-2">
@@ -337,8 +319,8 @@ export function MLPlaybookTab() {
             </div>
             {activeJobDetails && (
               <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
-                activeJobDetails.status === "running" ? "bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse" :
-                activeJobDetails.status === "completed" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
+                activeJobDetails.status === "Running" ? "bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse" :
+                activeJobDetails.status === "Completed" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
                 "bg-rose-500/10 text-rose-400 border border-rose-500/20"
               }`}>
                 {activeJobDetails.status}
@@ -348,14 +330,13 @@ export function MLPlaybookTab() {
 
           {activeJobId ? (
             <div className="flex-1 flex flex-col justify-between mt-4 space-y-4">
-              
-              {/* Recharts Live Loss Curve */}
+
               <div className="bg-slate-950 p-4 rounded-2xl border border-white/5 h-56 relative overflow-hidden">
                 <div className="absolute top-3 left-4 flex items-center gap-1.5 text-[10px] text-slate-500 font-bold uppercase tracking-wider">
                   <TrendingDown className="w-3.5 h-3.5 text-rose-400" />
                   Real-time Neural Loss Curve
                 </div>
-                
+
                 {jobMetrics?.metrics && jobMetrics.metrics.length > 0 ? (
                   <div className="w-full h-full pt-4">
                     <ResponsiveContainer width="100%" height="90%">
@@ -381,7 +362,6 @@ export function MLPlaybookTab() {
                 )}
               </div>
 
-              {/* Terminal logs viewer */}
               <div className="bg-slate-950 p-4 rounded-2xl border border-white/5 flex-1 flex flex-col overflow-hidden h-44 font-mono">
                 <div className="text-[10px] text-slate-500 font-bold uppercase tracking-wider pb-2 border-b border-white/5 mb-2 flex items-center gap-1.5">
                   <TerminalIcon className="w-3.5 h-3.5 text-emerald-400" />
@@ -390,7 +370,7 @@ export function MLPlaybookTab() {
                 <div className="flex-1 overflow-y-auto space-y-1 text-slate-400 text-[10px] leading-relaxed pr-2 scrollbar-thin scrollbar-thumb-slate-800">
                   {activeJobDetails?.output && activeJobDetails.output.length > 0 ? (
                     activeJobDetails.output.map((line: string, lIdx: number) => (
-                      <div key={lIdx} className="whitespace-pre-wrap font-mono">
+                      <div key={`line-${lIdx}`} className="whitespace-pre-wrap font-mono">
                         {line.includes("[METRIC]") ? (
                           <span className="text-emerald-400 font-bold">{line}</span>
                         ) : line.includes("Error") || line.includes("FAILED") ? (
@@ -423,7 +403,6 @@ export function MLPlaybookTab() {
         </div>
       </div>
 
-      {/* Model Version Registry Table */}
       <div className="bg-slate-900 border border-white/5 rounded-3xl overflow-hidden shadow-2xl">
         <div className="p-6 border-b border-white/5 bg-slate-900/50 flex justify-between items-center">
           <div>
@@ -451,12 +430,12 @@ export function MLPlaybookTab() {
             </thead>
             <tbody className="divide-y divide-white/5">
               {versions && versions.length > 0 ? (
-                versions.map((ver: any, vIdx: number) => {
+                versions.map((ver: ModelVersion) => {
                   const isCurrent = ver.status === "deployed";
                   const params = ver.hyperparameters || {};
-                  
+
                   return (
-                    <tr key={vIdx} className={`hover:bg-slate-800/30 transition-all ${isCurrent ? 'bg-emerald-500/[0.02]' : ''}`}>
+                    <tr key={ver.version} className={`hover:bg-slate-800/30 transition-all ${isCurrent ? 'bg-emerald-500/[0.02]' : ''}`}>
                       <td className="px-6 py-4 font-mono font-bold text-white flex items-center gap-2">
                         <Layers className="w-3.5 h-3.5 text-cyan-400" />
                         {ver.version}

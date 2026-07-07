@@ -1,41 +1,54 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import { 
   ShieldAlert, 
   ShieldCheck, 
-  Activity, 
   Network, 
   Globe, 
   Lock, 
   Unlock, 
   Info, 
-  Terminal,
   X,
   Copy,
   Check,
   ChevronRight,
-  TrendingUp,
-  Sliders,
   MapPin,
   Cpu
 } from "lucide-react";
 
-import { apiUrl } from "../lib/api";
+import type { Alert } from "../lib/types";
+import { apiUrl, fetcher } from "../lib/api";
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
+const PAGE_SIZE = 30;
 
-export function AlertsTab({ alerts }: any) {
-  const [selectedAlertForDrawer, setSelectedAlertForDrawer] = useState<any | null>(null);
+export function AlertsTab({ alerts }: { alerts: Alert[] }) {
+  const [selectedAlertForDrawer, setSelectedAlertForDrawer] = useState<Alert | null>(null);
   const [mitigatingIP, setMitigatingIP] = useState<string | null>(null);
   const [copiedIP, setCopiedIP] = useState<string | null>(null);
+  const [displayCount, setDisplayCount] = useState(PAGE_SIZE);
   const { mutate } = useSWRConfig();
 
-  // Fetch the active blocked list to dynamically show current firewall status
-  const { data: blockedIPs } = useSWR(apiUrl("/api/settings/blocked_ips"), fetcher);
+  const { data: blockedIPs } = useSWR<string[]>(apiUrl("/api/settings/blocked_ips"), fetcher);
+
+  useEffect(() => {
+    if (!selectedAlertForDrawer) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelectedAlertForDrawer(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedAlertForDrawer]);
+
+  useEffect(() => {
+    setDisplayCount(PAGE_SIZE);
+  }, [alerts.length]);
 
   if (!alerts) return <div className="text-slate-400 p-8 animate-pulse text-center">Loading Alert History...</div>;
+
+  const visibleAlerts = alerts.slice(0, displayCount);
+  const hasMore = alerts.length > displayCount;
 
   const isBlocked = (ip: string) => {
     return blockedIPs?.includes(ip) || false;
@@ -58,14 +71,12 @@ export function AlertsTab({ alerts }: any) {
         body: JSON.stringify({ action, ip })
       });
       if (response.ok) {
-        // Mutate blocked_ips cache immediately to trigger a UI update
         await mutate(apiUrl("/api/settings/blocked_ips"));
       } else {
-        alert(`Failed to execute firewall action: ${response.statusText}`);
+        console.error(`Failed to execute firewall action: ${response.statusText}`);
       }
     } catch (err) {
       console.error(err);
-      alert("Network error executing firewall action.");
     } finally {
       setMitigatingIP(null);
     }
@@ -74,11 +85,11 @@ export function AlertsTab({ alerts }: any) {
   return (
     <div className="relative">
       {/* Table Container */}
-      <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 bg-slate-900 border border-white/5 rounded-2xl overflow-hidden shadow-2xl">
+      <div className="bg-slate-900 border border-white/5 rounded-2xl overflow-hidden shadow-2xl">
         <div className="p-6 border-b border-white/5 flex justify-between items-center bg-slate-900/50">
           <div>
             <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              <ShieldAlert className="w-5 h-5 text-rose-500" />
+              <ShieldAlert className="w-5 h-5 text-rose-500" aria-hidden="true" />
               Alert Explorer
             </h2>
             <p className="text-sm text-slate-400 mt-1">Real-time log of security events matching active signatures or high ML thresholds. Click any alert to inspect explainability features and network paths.</p>
@@ -89,7 +100,7 @@ export function AlertsTab({ alerts }: any) {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm text-slate-300 border-collapse">
+          <table className="w-full text-left text-sm text-slate-300 border-collapse" aria-label="Alert events table">
             <thead className="text-xs uppercase bg-slate-950/70 text-slate-400 border-b border-white/5 font-semibold tracking-wider">
               <tr>
                 <th className="px-6 py-4">Timestamp</th>
@@ -101,14 +112,16 @@ export function AlertsTab({ alerts }: any) {
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {alerts.slice(0, 30).map((alert: any, idx: number) => {
+              {visibleAlerts.map((alert: Alert) => {
                 const ipCurrentlyBlocked = isBlocked(alert._src_ip);
                 const isSelected = selectedAlertForDrawer && selectedAlertForDrawer._alerted_at === alert._alerted_at && selectedAlertForDrawer._src_ip === alert._src_ip;
 
                 return (
-                  <tr 
-                    key={idx} 
+                  <tr
+                    key={`${alert._alerted_at}-${alert._src_ip}-${alert._dst_ip}`}
                     onClick={() => setSelectedAlertForDrawer(alert)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedAlertForDrawer(alert); } }}
+                    tabIndex={0}
                     className={`hover:bg-slate-800/40 transition-all cursor-pointer select-none ${isSelected ? 'bg-slate-800/45 border-l-2 border-emerald-500' : ''}`}
                   >
                     <td className="px-6 py-4 font-mono text-slate-400 text-xs">
@@ -147,10 +160,10 @@ export function AlertsTab({ alerts }: any) {
                               : 'bg-rose-500/10 border-rose-500/20 text-rose-400 hover:bg-rose-500/20 animate-pulse'
                           }`}
                         >
-                          {ipCurrentlyBlocked ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+                          {ipCurrentlyBlocked ? <Unlock className="w-3.5 h-3.5" aria-hidden="true" /> : <Lock className="w-3.5 h-3.5" aria-hidden="true" />}
                           {ipCurrentlyBlocked ? 'Unblock' : 'Block'}
                         </button>
-                        <ChevronRight className="w-4 h-4 text-slate-500" />
+                        <ChevronRight className="w-4 h-4 text-slate-500" aria-hidden="true" />
                       </div>
                     </td>
                   </tr>
@@ -158,16 +171,27 @@ export function AlertsTab({ alerts }: any) {
               })}
             </tbody>
           </table>
+          {hasMore && (
+            <div className="p-4 border-t border-white/5 flex justify-center">
+              <button
+                onClick={() => setDisplayCount((c) => c + PAGE_SIZE)}
+                className="px-5 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-white/5 transition"
+              >
+                Show {Math.min(PAGE_SIZE, alerts.length - displayCount)} More Alerts
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Side Slide-over Drawer for explainability enrichment */}
       {selectedAlertForDrawer && (
-        <div className="fixed inset-0 z-50 flex justify-end overflow-hidden animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-50 flex justify-end overflow-hidden" role="dialog" aria-modal="true" aria-label="Alert detail drawer">
           {/* Backdrop Overlay */}
-          <div 
-            className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm transition-opacity" 
+          <div
+            className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm transition-opacity"
             onClick={() => setSelectedAlertForDrawer(null)}
+            aria-hidden="true"
           />
 
           {/* Drawer Body Panel */}
@@ -178,16 +202,17 @@ export function AlertsTab({ alerts }: any) {
               <div>
                 <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-widest block">Security Event Analysis</span>
                 <h3 className="text-lg font-bold text-white mt-1 flex items-center gap-2">
-                  <ShieldAlert className="w-5 h-5 text-rose-500" />
+                  <ShieldAlert className="w-5 h-5 text-rose-500" aria-hidden="true" />
                   Alert Attributions
                 </h3>
               </div>
-              <button 
-                type="button" 
+              <button
+                type="button"
                 onClick={() => setSelectedAlertForDrawer(null)}
                 className="bg-slate-950/50 p-2 rounded-lg border border-white/5 text-slate-400 hover:text-white transition duration-150"
+                aria-label="Close drawer"
               >
-                <X className="w-4 h-4" />
+                <X className="w-4 h-4" aria-hidden="true" />
               </button>
             </div>
 
@@ -248,7 +273,7 @@ export function AlertsTab({ alerts }: any) {
             {/* IP Connection path diagram */}
             <div className="bg-slate-950 p-5 rounded-2xl border border-white/5 space-y-4 shadow-inner">
               <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                <Network className="w-4 h-4 text-cyan-400" />
+                <Network className="w-4 h-4 text-cyan-400" aria-hidden="true" />
                 Network Flow Mapping
               </h4>
 
@@ -259,11 +284,12 @@ export function AlertsTab({ alerts }: any) {
                     <code className="text-xs font-mono text-cyan-400 font-bold truncate">
                       {selectedAlertForDrawer._src_ip}
                     </code>
-                    <button 
+                    <button
                       onClick={(e) => handleCopy(selectedAlertForDrawer._src_ip, e)}
                       className="text-slate-500 hover:text-white transition duration-150"
+                      aria-label={`Copy source IP ${selectedAlertForDrawer._src_ip}`}
                     >
-                      {copiedIP === selectedAlertForDrawer._src_ip ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      {copiedIP === selectedAlertForDrawer._src_ip ? <Check className="w-3 h-3 text-emerald-400" aria-hidden="true" /> : <Copy className="w-3 h-3" aria-hidden="true" />}
                     </button>
                   </div>
                   <span className="text-[10px] text-slate-400 font-mono mt-0.5 block">Port: {selectedAlertForDrawer._src_port}</span>
@@ -280,11 +306,12 @@ export function AlertsTab({ alerts }: any) {
                     <code className="text-xs font-mono text-slate-200 font-bold truncate">
                       {selectedAlertForDrawer._dst_ip}
                     </code>
-                    <button 
+                    <button
                       onClick={(e) => handleCopy(selectedAlertForDrawer._dst_ip, e)}
                       className="text-slate-500 hover:text-white transition duration-150"
+                      aria-label={`Copy destination IP ${selectedAlertForDrawer._dst_ip}`}
                     >
-                      {copiedIP === selectedAlertForDrawer._dst_ip ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      {copiedIP === selectedAlertForDrawer._dst_ip ? <Check className="w-3 h-3 text-emerald-400" aria-hidden="true" /> : <Copy className="w-3 h-3" aria-hidden="true" />}
                     </button>
                   </div>
                   <span className="text-[10px] text-slate-400 font-mono mt-0.5 block">Port: {selectedAlertForDrawer._dst_port}</span>
@@ -295,7 +322,7 @@ export function AlertsTab({ alerts }: any) {
             {/* AI Explainability & Contributing Features */}
             <div className="bg-slate-950 p-5 rounded-2xl border border-white/5 space-y-4 shadow-inner">
               <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                <Cpu className="w-4 h-4 text-fuchsia-400" />
+                <Cpu className="w-4 h-4 text-fuchsia-400" aria-hidden="true" />
                 AI Inference Driver & Contributors
               </h4>
 
@@ -314,12 +341,12 @@ export function AlertsTab({ alerts }: any) {
 
                   <div className="space-y-3">
                     <span className="text-[9px] text-slate-500 uppercase tracking-wider block">Top Contributing Feature Metrics</span>
-                    {selectedAlertForDrawer.explanation.features && selectedAlertForDrawer.explanation.features.length > 0 ? (
+                    {selectedAlertForDrawer.explanation!.features && selectedAlertForDrawer.explanation!.features.length > 0 ? (
                       <div className="space-y-3">
-                        {selectedAlertForDrawer.explanation.features.slice(0, 3).map((feat: any, fIdx: number) => {
-                          const maxScore = Math.max(...selectedAlertForDrawer.explanation.features.map((f: any) => f.score)) || 1.0;
+                        {selectedAlertForDrawer.explanation!.features.slice(0, 3).map((feat: { name: string; score: number }, fIdx: number) => {
+                          const maxScore = Math.max(...selectedAlertForDrawer.explanation!.features.map((f: { score: number }) => f.score)) || 1.0;
                           const pct = (feat.score / maxScore) * 100;
-                          const isRF = selectedAlertForDrawer.explanation.driver.includes("Random Forest");
+                          const isRF = selectedAlertForDrawer.explanation!.driver.includes("Random Forest");
                           
                           return (
                             <div key={fIdx} className="space-y-1.5">
@@ -345,11 +372,11 @@ export function AlertsTab({ alerts }: any) {
                   <div className="grid grid-cols-2 gap-3 pt-3 border-t border-white/5">
                     <div className="bg-slate-900/60 p-2.5 rounded-xl border border-white/5 text-center">
                       <span className="text-[9px] text-slate-500 uppercase tracking-wider block">RF Classifier Probability</span>
-                      <span className="text-xs font-mono font-bold text-sky-400 mt-1 block">{(selectedAlertForDrawer.rf_score * 100).toFixed(1)}%</span>
+                      <span className="text-xs font-mono font-bold text-sky-400 mt-1 block">{((selectedAlertForDrawer.rf_score ?? 0) * 100).toFixed(1)}%</span>
                     </div>
                     <div className="bg-slate-900/60 p-2.5 rounded-xl border border-white/5 text-center">
                       <span className="text-[9px] text-slate-500 uppercase tracking-wider block">AE Anomaly MSE</span>
-                      <span className="text-xs font-mono font-bold text-fuchsia-400 mt-1 block">{(selectedAlertForDrawer.ae_score * 100).toFixed(1)}%</span>
+                      <span className="text-xs font-mono font-bold text-fuchsia-400 mt-1 block">{((selectedAlertForDrawer.ae_score ?? 0) * 100).toFixed(1)}%</span>
                     </div>
                   </div>
 
@@ -359,7 +386,7 @@ export function AlertsTab({ alerts }: any) {
                   <span className="text-[9px] text-slate-500 uppercase tracking-wider block">Attribution Source</span>
                   <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-xl text-amber-400">
                     <p className="text-xs font-semibold flex items-center gap-1.5 mb-1">
-                      <ShieldCheck className="w-4 h-4" />
+                      <ShieldCheck className="w-4 h-4" aria-hidden="true" />
                       Signature Match Rule
                     </p>
                     <p className="text-[11px] leading-relaxed text-amber-400/80">
@@ -373,7 +400,7 @@ export function AlertsTab({ alerts }: any) {
             {/* Geolocation Threat Intel */}
             <div className="bg-slate-950 p-5 rounded-2xl border border-white/5 space-y-4 shadow-inner">
               <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                <Globe className="w-4 h-4 text-purple-400" />
+                <Globe className="w-4 h-4 text-purple-400" aria-hidden="true" />
                 Threat Intelligence Enrichment
               </h4>
 
@@ -383,7 +410,7 @@ export function AlertsTab({ alerts }: any) {
                     <div className="space-y-0.5">
                       <span className="text-[9px] text-slate-500 uppercase tracking-wider block">Geographic Origin</span>
                       <p className="text-xs font-semibold text-white flex items-center gap-1.5">
-                        <MapPin className="w-3.5 h-3.5 text-purple-400" />
+                        <MapPin className="w-3.5 h-3.5 text-purple-400" aria-hidden="true" />
                         <span>{selectedAlertForDrawer.country || "Private IP"}</span>
                         {selectedAlertForDrawer.city && <span className="text-slate-400 font-normal">({selectedAlertForDrawer.city})</span>}
                       </p>
@@ -415,7 +442,7 @@ export function AlertsTab({ alerts }: any) {
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center py-4 text-slate-500 text-center gap-2">
-                  <Info className="w-5 h-5 text-slate-600" />
+                  <Info className="w-5 h-5 text-slate-600" aria-hidden="true" />
                   <p className="text-xs">No public geolocation / reputation records.</p>
                   <span className="text-[9px] text-slate-600">Source IP resides in a local or reserved intranet subnet range.</span>
                 </div>
@@ -439,12 +466,12 @@ export function AlertsTab({ alerts }: any) {
               >
                 {isBlocked(selectedAlertForDrawer._src_ip) ? (
                   <>
-                    <Unlock className="w-4 h-4" />
+                    <Unlock className="w-4 h-4" aria-hidden="true" />
                     Unblock IP on Firewall
                   </>
                 ) : (
                   <>
-                    <Lock className="w-4 h-4 fill-current" />
+                    <Lock className="w-4 h-4 fill-current" aria-hidden="true" />
                     Mitigate Threat: Block IP
                   </>
                 )}
