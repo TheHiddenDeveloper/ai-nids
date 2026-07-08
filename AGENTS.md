@@ -10,7 +10,8 @@ Flat scripts layout. All scripts and tests use `sys.path.insert(0, ...)` to find
 
 | Action | Command |
 |--------|---------|
-| Live capture + inference | `python scripts/run_monitor.py --interface eth0` |
+| Live capture (auto interface) | `python scripts/run_monitor.py` |
+| Live capture + inference | `python scripts/run_monitor.py --interface wlp4s0` |
 | Pcap replay | `python scripts/run_monitor.py --pcap file.pcap` |
 | Signature-only mode | `python scripts/run_monitor.py --no-model` |
 | Full training | `python scripts/train.py --precision high` |
@@ -38,6 +39,9 @@ Flat scripts layout. All scripts and tests use `sys.path.insert(0, ...)` to find
 
 ## Config
 Central `config.yaml` (no `.env`). Change interface, Redis toggle, severity thresholds, model paths there.
+
+### Auto-detection
+Interface auto-detects when set to `"auto"` in config (default). HOME_NET derives from the interface IP as `/32` when set to `["auto"]`. This means zero config needed on laptop/desktop — just plug into any WiFi. For servers, pass explicit `home_net` values in config.yaml; the interface auto-detection is harmless but you may also set a static interface name.
 
 ## Frontend
 Next.js with `output: 'export'` (static site served by FastAPI at `/`). See `frontend/AGENTS.md` — this Next.js version has breaking changes from agent training data.

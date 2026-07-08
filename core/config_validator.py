@@ -37,8 +37,8 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class NetworkConfig(BaseModel):
-    interface: str = "eth0"
-    home_net: list[str] = ["192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"]
+    interface: str = "auto"
+    home_net: list[str] = ["auto"]
     capture_timeout: int = Field(default=10, ge=1)
     max_packets: int = Field(default=1000, ge=1)
 

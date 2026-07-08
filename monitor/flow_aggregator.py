@@ -395,6 +395,16 @@ class FlowAggregator:
         proto = pkt.get("protocol", 0)
         return (min(src, dst), max(src, dst), proto)
 
+    def update_home_net(self, home_net: list[str]) -> None:
+        """Update HOME_NET for direction classification of NEW flows.
+
+        Existing active flows retain their previously computed direction.
+        Call this when the network configuration changes at runtime (e.g.,
+        IP address change detected by pipeline maintenance loop).
+        """
+        self.home_net = home_net
+        logger.info(f"FlowAggregator HOME_NET updated: {home_net}")
+
     def ingest(self, pkt: dict) -> List[dict]:
         """
         Add packet to matching flow. No longer does inline eviction (L2).

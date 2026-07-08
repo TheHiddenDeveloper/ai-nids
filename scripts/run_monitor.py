@@ -45,6 +45,7 @@ import signal
 import argparse
 import os
 import psutil
+from core.network_auto import auto_detect_network
 import yaml
 import subprocess
 import threading
@@ -90,7 +91,7 @@ Examples:
   sudo python scripts/run_monitor.py --interface eth0 --no-model
         """,
     )
-    p.add_argument("--interface", "-i",  default="eth0",   help="NIC for live capture (default: eth0)")
+    p.add_argument("--interface", "-i",  default="auto",   help="NIC for live capture (default: auto-detect)")
     p.add_argument("--pcap",             default=None,      help="Replay a .pcap file instead of live capture")
     p.add_argument("--timeout",   type=int, default=30,    help="Capture window seconds (default: 30)")
     p.add_argument("--flow-timeout", type=int, default=20, help="Seconds before a flow is considered complete (default: 20)")
@@ -121,8 +122,13 @@ def configure_logging(verbose: bool):
     )
 
 
-def print_banner(args, pipeline: NIDSPipeline, config: dict):
-    mode = "pcap replay" if args.pcap else f"live capture on {args.interface}"
+def print_banner(args, pipeline: NIDSPipeline, config: dict, net_config: dict = None):
+    if args.pcap:
+        mode = "pcap replay"
+    elif net_config and net_config.get("auto_detected"):
+        mode = f"live capture on {net_config['interface']} (auto)"
+    else:
+        mode = f"live capture on {args.interface}"
     ai   = "AI + signatures" if pipeline.is_model_loaded else "signatures only"
     logger.info("=" * 52)
     logger.info("  AI-NIDS Monitor")
@@ -155,6 +161,14 @@ def main():
     bus   = EventBus()
     stats = StatsTracker(window_secs=300)
 
+    cfg_home_net = config.get("network", {}).get("home_net")
+    net_config = auto_detect_network(
+        explicit_interface=args.interface,
+        explicit_home_net=cfg_home_net,
+    )
+    effective_interface = net_config["interface"]
+    effective_home_net = net_config["home_net"]
+
     pipeline = NIDSPipeline(
         model_dir      = str(model_dir),
         flow_log_path  = "data/flows.jsonl",
@@ -165,13 +179,16 @@ def main():
         use_signatures = True,
         event_bus      = bus,
         stats_tracker  = stats,
-        home_net       = config.get("network", {}).get("home_net")
+        home_net       = effective_home_net,
     )
 
     if not pipeline.start():
         sys.exit(1)
 
-    print_banner(args, pipeline, config)
+    if net_config.get("ip"):
+        pipeline.set_network_monitoring(effective_interface, net_config)
+
+    print_banner(args, pipeline, config, net_config)
 
     # ── Graceful shutdown on Ctrl-C / SIGTERM ─────────────────────────────────
     def _shutdown(sig, frame):
@@ -254,7 +271,7 @@ def main():
     # ── Live capture ──────────────────────────────────────────────────────────
     # Run sniff in a background thread for continuous capture.
     # Use a large timeout so the socket is periodically recycled cleanly.
-    cap = PacketCapture(interface=args.interface, timeout=3600)
+    cap = PacketCapture(interface=effective_interface, timeout=3600)
 
     def _sniff_loop():
         while True:
@@ -266,7 +283,7 @@ def main():
 
     sniff_thread = threading.Thread(target=_sniff_loop, daemon=True, name="nids-sniff")
     sniff_thread.start()
-    logger.info(f"Continuous capture started on {args.interface} (background thread)")
+    logger.info(f"Continuous capture started on {effective_interface} (background thread)")
 
     process = psutil.Process(os.getpid())
     window = 0

@@ -50,6 +50,7 @@ from ai_engine.ensemble import EnsembleInferenceEngine
 from ai_engine.alert_engine import process_results
 from signatures.checker import SignatureChecker
 from core.event_bus import EventBus
+from core.network_auto import poll_network_change
 from core.deduplicator import AlertDeduplicator
 from core.stats_tracker import StatsTracker
 from core.correlator import IncidentCorrelator
@@ -87,6 +88,8 @@ class NIDSPipeline:
         self.use_signatures = use_signatures
         self.home_net       = home_net or []
         self.max_active_flows = max_active_flows  # L4
+        self._net_interface = None
+        self._net_config_snapshot = None
 
         # Core processing components
         self.aggregator  = FlowAggregator(flow_timeout=flow_timeout, home_net=self.home_net)
@@ -180,6 +183,9 @@ class NIDSPipeline:
 
         if self.engine:
             raw_results = self.engine.predict(df)
+            # Inject flow features so sig_checker can inspect syn_flag_count, direction, etc.
+            for result, flow in zip(raw_results, flows):
+                result.update({k: v for k, v in flow.items() if not k.startswith("_")})
         else:
             # Build minimal result dicts from raw flow dicts for sig-only path
             raw_results = []
@@ -257,6 +263,7 @@ class NIDSPipeline:
 
     def _maintenance_loop(self):
         """Background: evict stale flows, dedup keys, incidents, old data."""
+        poll_counter = 0
         while not self._stop_event.wait(timeout=10):
             expired_flows = self.aggregator.flush_expired()
             if expired_flows:
@@ -277,6 +284,29 @@ class NIDSPipeline:
             self._cleanup_counter += 1
             if self.retention_days > 0 and self._cleanup_counter % 100 == 0:
                 cleanup_old_data(retention_days=self.retention_days)
+
+            # Network change poll (~every 60s = 6 iterations at 10s interval)
+            poll_counter += 1
+            if poll_counter % 6 == 0 and self._net_config_snapshot and self._net_interface:
+                changed = poll_network_change(
+                    self._net_config_snapshot,
+                    self._net_interface,
+                    self.home_net,
+                )
+                if changed:
+                    logger.warning(
+                        f"Network change detected: IP {self._net_config_snapshot.get('ip')} "
+                        f"-> {changed.get('ip')}. Updating HOME_NET for new flows."
+                    )
+                    new_nets = changed["home_net"]
+                    self.aggregator.update_home_net(new_nets)
+                    self.home_net = new_nets
+                    self._net_config_snapshot = changed
+
+    def set_network_monitoring(self, interface: str, net_config: dict) -> None:
+        """Seed the network-change poller with interface + initial snapshot."""
+        self._net_interface = interface
+        self._net_config_snapshot = net_config
 
     @property
     def active_flows(self) -> int:
