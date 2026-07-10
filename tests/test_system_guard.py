@@ -414,7 +414,7 @@ class TestAttackDetection:
         n_flows, alerts = _flush_and_stop(pipeline)
         assert len(alerts) >= 1
         sigs = " ".join(a.get("signature_match", "") for a in alerts)
-        assert "PORT_SCAN_001" in sigs
+        assert "PORT_SCAN_MASS_001" in sigs
 
     def test_fin_scan_detected(self):
         from core.pipeline import NIDSPipeline
@@ -535,7 +535,7 @@ class TestMultiAttackDetection:
         assert len(alerts) >= 5, f"Expected >=5 alerts, got {len(alerts)}"
         sigs = " ".join(a.get("signature_match", "") for a in alerts)
         assert "SYN_FLOOD_001" in sigs
-        assert "PORT_SCAN_001" in sigs
+        assert "PORT_SCAN_MASS_001" in sigs
         assert "C2_BEACON_001" in sigs
         assert "BAD_PORT_SMB" in sigs
         assert "BRUTEFORCE_SSH_001" in sigs
@@ -859,7 +859,7 @@ class TestCompleteGuardScenario:
         # Verify detection
         sigs = " ".join(a.get("signature_match", "") for a in all_alerts)
         assert "SYN_FLOOD_001" in sigs, "SYN flood undetected"
-        assert "PORT_SCAN_001" in sigs, "Port scan undetected"
+        assert "PORT_SCAN_MASS_001" in sigs, "Port scan undetected"
         assert "BAD_PORT_SMB" in sigs, "SMB traffic undetected"
         assert "C2_BEACON_001" in sigs, "C2 beacon undetected"
         assert "BRUTEFORCE_SSH_001" in sigs, "SSH brute-force undetected"
@@ -867,8 +867,8 @@ class TestCompleteGuardScenario:
         # Verify severity classification
         high = [a for a in all_alerts if a.get("severity") == "high"]
         medium = [a for a in all_alerts if a.get("severity") == "medium"]
-        assert len(high) >= 1, "Expected high severity alerts"
-        assert len(medium) >= 1, "Expected medium severity alerts"
+        assert len(high) >= 4, "Expected high severity alerts for all attack types"
+        assert len(all_alerts) >= 5, "Expected alerts for all 5 attack types"
 
         # Verify alerts persisted
         conn = get_db_connection()

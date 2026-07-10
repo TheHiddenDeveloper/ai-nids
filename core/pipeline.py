@@ -249,7 +249,9 @@ class NIDSPipeline:
                         "asn":          intel.get("asn"),
                         "threat_level": intel.get("threat_level"),
                         "is_malicious": intel.get("is_malicious"),
-                        "isp":          intel.get("isp")
+                        "isp":          intel.get("isp"),
+                        "_src_ip_lat":  intel.get("lat"),
+                        "_src_ip_lon":  intel.get("lon"),
                     })
 
                 alert["incident_id"] = self.correlator.process_alert(alert, intel=intel)

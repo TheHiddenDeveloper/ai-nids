@@ -40,6 +40,12 @@ Design:
 """
 
 import sys
+from pathlib import Path
+
+# Must insert project root into sys.path BEFORE any local imports
+_project_root = str(Path(__file__).resolve().parent.parent)
+sys.path.insert(0, _project_root)
+
 import time
 import signal
 import argparse
@@ -49,12 +55,9 @@ from core.network_auto import auto_detect_network
 import yaml
 import subprocess
 import threading
-from pathlib import Path
 
 # ── Virtual Environment Check ────────────────────────────────────────────────
 def check_venv():
-    # If not running in our specific venv, warn or exit
-    # We check if uvicorn or loguru are available in the current path
     try:
         import loguru
     except ImportError:
@@ -68,8 +71,6 @@ def check_venv():
         sys.exit(1)
 
 check_venv()
-
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from loguru import logger
 from monitor.capture import PacketCapture, PcapReplay

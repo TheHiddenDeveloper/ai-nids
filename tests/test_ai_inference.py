@@ -1,7 +1,7 @@
 """
-================================================================================
+===============================================================================
 TEST: AI INFERENCE — Ensemble Engine Integration Test
-================================================================================
+===============================================================================
 Purpose:
   Integration test for EnsembleInferenceEngine. Requires trained models in
   data/models/. Creates benign and anomalous mock flows, runs inference, and
@@ -14,9 +14,9 @@ Run:
 Asserts:
   - Load returns True with trained models present
   - Engine.mode is not "unloaded"
-  - Benign flow (dst_port=443, normal params) → score < 0.5
-  - Anomalous flow (dst_port=6666, high bytes/sec) → score > 0.5
-================================================================================
+  - Benign DNS query flow (port 53, normal params) → score < 0.5
+  - SYN scan probe flow (zero duration, syn=1, no ACK) → score > 0.5
+===============================================================================
 """
 
 import sys
@@ -25,43 +25,81 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 
-# Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from ai_engine.ensemble import EnsembleInferenceEngine
 from ai_engine.dataset import FEATURE_COLS
 
+
+def _make_benign_dns():
+    """A realistic benign DNS query flow."""
+    flow = {k: 0.0 for k in FEATURE_COLS}
+    flow["dst_port"] = 53.0
+    flow["duration"] = 100000.0
+    flow["src_bytes"] = 100.0
+    flow["dst_bytes"] = 200.0
+    flow["packet_count"] = 4.0
+    flow["avg_packet_len"] = 75.0
+    flow["std_packet_len"] = 30.0
+    flow["fwd_packet_len_max"] = 100.0
+    flow["bwd_packet_len_max"] = 200.0
+    flow["syn_flag_count"] = 1.0
+    flow["ack_flag_count"] = 1.0
+    flow["syn_ratio"] = 0.25
+    flow["ack_ratio"] = 0.25
+    flow["port_is_dns"] = 1.0
+    flow["flow_bytes_per_sec"] = 3000.0
+    flow["flow_packets_per_sec"] = 40.0
+    flow["flow_iat_mean"] = 25000.0
+    flow["_src_ip"] = "192.168.1.10"
+    flow["_dst_ip"] = "8.8.8.8"
+    flow["_src_port"] = 40000
+    flow["_dst_port"] = 53
+    flow["_timestamp"] = 1000.0
+    return flow
+
+
+def _make_syn_scan():
+    """A realistic SYN scan probe flow (nmap-style)."""
+    flow = {k: 0.0 for k in FEATURE_COLS}
+    flow["dst_port"] = 6666.0
+    flow["duration"] = 0.0
+    flow["src_bytes"] = 60.0
+    flow["dst_bytes"] = 0.0
+    flow["packet_count"] = 1.0
+    flow["avg_packet_len"] = 60.0
+    flow["std_packet_len"] = 0.0
+    flow["fwd_packet_len_max"] = 60.0
+    flow["bwd_packet_len_max"] = 0.0
+    flow["syn_flag_count"] = 1.0
+    flow["ack_flag_count"] = 0.0
+    flow["syn_ratio"] = 1.0
+    flow["flow_bytes_per_sec"] = 60000.0
+    flow["_src_ip"] = "1.2.3.4"
+    flow["_dst_ip"] = "192.168.1.1"
+    flow["_src_port"] = 54321
+    flow["_dst_port"] = 6666
+    flow["_timestamp"] = 1001.0
+    return flow
+
+
 def test_ai_inference():
     print("Running Ensemble Inference Tests...")
     engine = EnsembleInferenceEngine()
-    
+
     if not engine.load():
         print("FAIL: Could not load ensemble models.")
         sys.exit(1)
-        
+
     print(f"Engine Mode: {engine.mode}")
     print(f"Details: {engine.describe()}")
 
-    # 1. Create a "Benign" Mock Flow
-    benign_flow = {k: 0.1 for k in FEATURE_COLS}
-    benign_flow["dst_port"] = 443
-    benign_flow["duration"] = 1.0
-    benign_flow["packet_count"] = 5
-    benign_flow["_src_ip"] = "192.168.1.10"
-    benign_flow["_dst_ip"] = "8.8.8.8"
-    
-    # 2. Create an "Anomalous" Mock Flow (High bytes per sec, weird port)
-    anomaly_flow = {k: 5.0 for k in FEATURE_COLS}
-    anomaly_flow["dst_port"] = 6666
-    anomaly_flow["duration"] = 0.001
-    anomaly_flow["flow_bytes_per_sec"] = 1000000.0
-    anomaly_flow["syn_flag_count"] = 10
-    anomaly_flow["_src_ip"] = "1.2.3.4"
-    anomaly_flow["_dst_ip"] = "192.168.1.1"
+    benign_flow = _make_benign_dns()
+    anomaly_flow = _make_syn_scan()
 
     df = pd.DataFrame([benign_flow, anomaly_flow])
     results = engine.predict(df)
-    
+
     for i, res in enumerate(results):
         print(f"\nFlow {i+1} ({res['_src_ip']} -> {res['_dst_ip']}):")
         print(f"  Ensemble Score: {res['score']:.4f}")
@@ -71,10 +109,10 @@ def test_ai_inference():
         if "explanation" in res:
             print(f"  Explanation:    {res['explanation']}")
 
-    # Assertions
     assert results[0]["score"] < 0.5, "Benign flow flagged as attack"
     assert results[1]["score"] > 0.5, "Anomalous flow NOT flagged as attack"
     print("\n--- ALL AI INFERENCE TESTS PASSED ---")
+
 
 if __name__ == "__main__":
     try:

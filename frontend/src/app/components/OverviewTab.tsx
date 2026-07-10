@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import type { KPIs, Alert } from "../lib/types";
+import { AlertTimeline } from "./AlertTimeline";
 
 function MetricCard({ title, value, delta }: { title: string; value: string | number; delta?: number }) {
   return (
@@ -93,9 +94,12 @@ export function OverviewTab({ kpis, alerts }: { kpis: KPIs | undefined; alerts: 
              <span className="text-rose-400 font-bold text-2xl">{lastCount}</span>
            </div>
            <h3 className="text-slate-300 font-medium mb-1">Current Spike Intensity</h3>
-           <p className="text-slate-500 text-sm text-center">Active anomalies registering dynamically.</p>
-        </div>
+            <p className="text-slate-500 text-sm text-center">Active anomalies registering dynamically.</p>
+         </div>
       </div>
+
+      {/* Event Timeline */}
+      <AlertTimeline alerts={alerts || []} />
     </div>
   );
 }

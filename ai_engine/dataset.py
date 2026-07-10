@@ -94,8 +94,9 @@ def load_cicids2017(data_dir: str = "data/raw/cicids2017") -> pd.DataFrame:
         combined["packet_count"] = combined["fwd_count"] + combined["bwd_count"]
 
     # FV3 — compute flag ratios from raw CICIDS counts
-    for count_col in ["syn_flag_count", "fin_flag_count", "rst_flag_count", "ack_flag_count", "psh_flag_count"]:
-        ratio_col = count_col.replace("_count", "_ratio").replace("flag", "")
+    fv3_map = {"syn_flag_count": "syn_ratio", "fin_flag_count": "fin_ratio",
+               "rst_flag_count": "rst_ratio", "ack_flag_count": "ack_ratio", "psh_flag_count": "psh_ratio"}
+    for count_col, ratio_col in fv3_map.items():
         if count_col in combined.columns and "packet_count" in combined.columns:
             combined[ratio_col] = np.where(combined["packet_count"] > 0, combined[count_col] / combined["packet_count"], 0.0)
 

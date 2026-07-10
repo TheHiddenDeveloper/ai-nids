@@ -106,26 +106,26 @@ class TestAllRules:
         metas = self.checker.check_with_metadata(flow)
         assert not any(m["rule_id"] == "UDP_FLOOD_001" for m in metas)
 
-    # ── PORT_SCAN_001 ──────────────────────────────────────────────────────────
+    # ── PORT_SCAN_MASS_001 ─────────────────────────────────────────────────────
 
-    def test_port_scan_001_triggers(self):
+    def test_port_scan_mass_001_triggers(self):
         flow = {"rst_flag_count": 50, "direction": "inbound"}
         metas = self.checker.check_with_metadata(flow)
         ids = [m["rule_id"] for m in metas]
-        assert "PORT_SCAN_001" in ids
-        meta = next(m for m in metas if m["rule_id"] == "PORT_SCAN_001")
-        assert meta["severity"] == "medium"
+        assert "PORT_SCAN_MASS_001" in ids
+        meta = next(m for m in metas if m["rule_id"] == "PORT_SCAN_MASS_001")
+        assert meta["severity"] == "high"
         assert "scan" in meta["tags"]
 
-    def test_port_scan_001_few_rsts(self):
+    def test_port_scan_mass_001_few_rsts(self):
         flow = {"rst_flag_count": 5, "direction": "inbound"}
         metas = self.checker.check_with_metadata(flow)
-        assert not any(m["rule_id"] == "PORT_SCAN_001" for m in metas)
+        assert not any(m["rule_id"] == "PORT_SCAN_MASS_001" for m in metas)
 
-    def test_port_scan_001_outbound(self):
+    def test_port_scan_mass_001_outbound(self):
         flow = {"rst_flag_count": 50, "direction": "outbound"}
         metas = self.checker.check_with_metadata(flow)
-        assert not any(m["rule_id"] == "PORT_SCAN_001" for m in metas)
+        assert not any(m["rule_id"] == "PORT_SCAN_MASS_001" for m in metas)
 
     # ── FIN_SCAN_001 ───────────────────────────────────────────────────────────
 
@@ -442,7 +442,7 @@ class TestAttackCategories:
         assert len(flood_rules) >= 1
 
     def test_scan_tag(self):
-        flow = {"rst_flag_count": 50, "direction": "inbound"}
+        flow = {"fin_flag_count": 10, "syn_flag_count": 0, "ack_flag_count": 0, "direction": "inbound"}
         metas = self.checker.check_with_metadata(flow)
         scan_rules = [m for m in metas if "scan" in m["tags"]]
         assert len(scan_rules) >= 1
@@ -505,7 +505,7 @@ class TestAlertEngineIntegration:
         sigs = json.loads(alerts[0]["signature_match"])
         rule_ids = [s["rule_id"] for s in sigs]
         assert "BAD_PORT_TELNET" in rule_ids
-        assert "PORT_SCAN_001" in rule_ids
+        assert "PORT_SCAN_MASS_001" in rule_ids
 
     def test_signature_enriches_alert_metadata(self):
         """Alert dict should contain signature_match with rule_id, severity, tags."""
@@ -572,7 +572,7 @@ class TestEdgeCases:
         metas = self.checker.check_with_metadata(flow)
         rule_ids = [m["rule_id"] for m in metas]
         assert "BAD_PORT_TELNET" in rule_ids
-        assert "PORT_SCAN_001" in rule_ids
+        assert "PORT_SCAN_MASS_001" in rule_ids
         assert len(rule_ids) >= 2
 
     def test_disabled_rules_never_match(self):
@@ -593,7 +593,7 @@ class TestRealRulesYamlSmoke:
 
     def test_loads_all_expected_rules(self):
         rules = self.checker.rules_summary
-        assert len(rules) == 20, f"Expected 20 rules, got {len(rules)}"
+        assert len(rules) == 25, f"Expected 25 rules, got {len(rules)}"
 
     def test_all_rule_ids_are_unique(self):
         rules = self.checker.rules_summary
@@ -603,7 +603,7 @@ class TestRealRulesYamlSmoke:
     def test_expected_enabled_count(self):
         enabled = sum(1 for r in self.checker.rules_summary if r["enabled"])
         disabled = self.checker.rule_count - enabled
-        assert enabled == 18, f"Expected 18 enabled rules, got {enabled}"
+        assert enabled == 23, f"Expected 23 enabled rules, got {enabled}"
         assert disabled == 2, f"Expected 2 disabled rules, got {disabled}"
 
     def test_known_attack_flow_hits_expected_rules(self):

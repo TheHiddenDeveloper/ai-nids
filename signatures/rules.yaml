@@ -55,13 +55,13 @@ rules:
   - field: avg_packet_len
     op: lt
     value: 100
-- id: PORT_SCAN_001
-  name: Port scan (RST-based)
-  description: 'Large number of RST packets from one source. Each RST typically means
-    a closed port was probed — strong indicator of a horizontal port scan.
+- id: PORT_SCAN_MASS_001
+  name: Port scan (mass RST)
+  description: 'Many RST packets from one source in a single flow. Indicates a mass
+    horizontal port scan where many closed ports responded with RST.
 
     '
-  severity: medium
+  severity: high
   enabled: true
   tags:
   - scan
@@ -370,3 +370,127 @@ rules:
   - field: flow_packets_per_sec
     op: gt
     value: 50
+- id: PORT_SCAN_SYN_001
+  name: Port scan (SYN probe)
+  description: 'Unreciprocated SYN — a SYN sent with no ACK reply and no data exchanged.
+    Indicates a single SYN scan probe against a port. Each flow represents one port
+    being probed; many such flows from the same source = active scan.
+
+    '
+  severity: medium
+  enabled: true
+  tags:
+  - scan
+  conditions:
+  - field: syn_flag_count
+    op: gt
+    value: 0
+  - field: ack_flag_count
+    op: eq
+    value: 0
+  - field: dst_bytes
+    op: eq
+    value: 0
+  - field: packet_count
+    op: lte
+    value: 3
+  - field: duration
+    op: lt
+    value: 5
+  - field: direction
+    op: eq
+    value: inbound
+- id: XMAS_SCAN_001
+  name: Xmas scan
+  description: 'FIN, PSH and URG flags all set simultaneously. No legitimate TCP
+    traffic uses this flag combination — definitive indicator of nmap Xmas tree scan.
+
+    '
+  severity: medium
+  enabled: true
+  tags:
+  - scan
+  conditions:
+  - field: fin_flag_count
+    op: gt
+    value: 0
+  - field: psh_flag_count
+    op: gt
+    value: 0
+  - field: syn_flag_count
+    op: eq
+    value: 0
+  - field: direction
+    op: eq
+    value: inbound
+- id: LOW_VOL_DOS_001
+  name: Slow DoS (low-and-slow)
+  description: 'Sustained low-rate flow with small packets inbound — slow HTTP DoS
+    (Slowloris / RUDY) pattern. Keeps connections open with trickle data.
+
+    '
+  severity: low
+  enabled: true
+  tags:
+  - dos
+  conditions:
+  - field: duration
+    op: gt
+    value: 30
+  - field: flow_bytes_per_sec
+    op: lt
+    value: 1000
+  - field: direction
+    op: eq
+    value: inbound
+- id: PORT_SCAN_RAPID_001
+  name: Port scan (RST response)
+  description: 'Flow with RST but no ACK — the target sent a RST rejecting the connection.
+    This is the normal response to a SYN scan against closed ports. Each flow = one
+    closed port discovered.
+
+    '
+  severity: medium
+  enabled: true
+  tags:
+  - scan
+  conditions:
+  - field: rst_flag_count
+    op: gt
+    value: 0
+  - field: ack_flag_count
+    op: eq
+    value: 0
+  - field: packet_count
+    op: lte
+    value: 3
+  - field: dst_bytes
+    op: eq
+    value: 0
+  - field: direction
+    op: eq
+    value: inbound
+- id: BRUTEFORCE_SSH_LOW_001
+  name: SSH brute-force (low threshold)
+  description: 'Repeated SYN-only traffic to SSH port at moderate pace — dictionary
+    attack with conservative rate limiting. Catches attacks that evade high-threshold
+    rules by spacing out attempts.
+
+    '
+  severity: medium
+  enabled: true
+  tags:
+  - bruteforce
+  conditions:
+  - field: dst_port
+    op: eq
+    value: 22
+  - field: syn_flag_count
+    op: gt
+    value: 2
+  - field: ack_flag_count
+    op: lte
+    value: 1
+  - field: direction
+    op: eq
+    value: inbound

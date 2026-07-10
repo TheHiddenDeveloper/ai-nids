@@ -89,7 +89,10 @@ class EnsembleInferenceEngine:
         """Read model weights and threshold from config.yaml, fall back to defaults."""
         try:
             import yaml
-            with open("config.yaml") as f:
+            cfg_path = Path("config.yaml")
+            if not cfg_path.exists():
+                cfg_path = Path(__file__).parent.parent / "config.yaml"
+            with open(cfg_path) as f:
                 cfg = yaml.safe_load(f) or {}
         except Exception:
             cfg = {}
@@ -262,12 +265,13 @@ class EnsembleInferenceEngine:
     def _ae_score(self, X: np.ndarray, X_scaled: np.ndarray = None) -> np.ndarray:
         """
         Return normalised anomaly score from AE, shape (n,).
-        Uses z-score relative to calibration-set MSE distribution (M4):
-          z = (mse - mse_mean) / mse_std
-        Clipped to [0, 1]; z=0 (benign mean) → 0, z=3 (3-sigma) → 1.0.
-        Falls back to mse / (threshold * 3) if no calibration data.
+        Uses threshold-relative scaling: score = mse / (threshold * 2.0).
+        At threshold (p95 of benign MSE on calibration set): score = 0.5
+        At 2x threshold: score = 1.0
+        At mean (typical benign): score ≈ 0.13
+        Clipped to [0, 1].
         M2: accepts optional pre-scaled array to avoid double transform.
-        OP6: ONNX inference path if available.
+        M6: ONNX inference path if available.
         """
         X_s = X_scaled if X_scaled is not None else (self._ae_scaler.transform(X) if self._ae_scaler is not None else X)
         X_s = X_s.astype(np.float32)
@@ -277,11 +281,7 @@ class EnsembleInferenceEngine:
         else:
             reconstructions = self._ae.predict(X_s, verbose=0)
         mse = np.mean(np.power(X_s - reconstructions, 2), axis=1)
-        if self._ae_mse_std > 0 and self._ae_mse_mean != 0.0:
-            z = (mse - self._ae_mse_mean) / self._ae_mse_std
-            normalised = np.clip(z / 3.0, 0.0, 1.0)
-        else:
-            normalised = np.clip(mse / (self._ae_threshold * 3.0), 0.0, 1.0)
+        normalised = np.clip(mse / (self._ae_threshold * 2.0), 0.0, 1.0)
         return normalised
 
     def _batch_explain(self, X: np.ndarray, rf_scores: np.ndarray, ae_scores: np.ndarray,

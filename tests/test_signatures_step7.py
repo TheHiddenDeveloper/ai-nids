@@ -332,14 +332,14 @@ class TestRealRulesYaml:
         if not self.REAL_RULES.exists():
             pytest.skip("signatures/rules.yaml not found")
         checker = SignatureChecker(rules_path=str(self.REAL_RULES))
-        flow = {"syn_flag_count": 100, "ack_flag_count": 0}
+        flow = {"syn_flag_count": 100, "ack_flag_count": 0, "direction": "inbound"}
         assert checker.check(flow) is not None
 
     def test_smb_port_fires(self):
         if not self.REAL_RULES.exists():
             pytest.skip("signatures/rules.yaml not found")
         checker = SignatureChecker(rules_path=str(self.REAL_RULES))
-        assert checker.check({"_dst_port": 445}) is not None
+        assert checker.check({"_dst_port": 445, "direction": "inbound"}) is not None
 
     def test_benign_flow_does_not_fire(self):
         if not self.REAL_RULES.exists():
