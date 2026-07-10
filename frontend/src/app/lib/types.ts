@@ -79,3 +79,51 @@ export interface Signature {
   tags: string[];
   enabled: boolean;
 }
+
+export interface TrainingReport {
+  version: string;
+  overall: {
+    accuracy: number;
+    precision: number;
+    recall: number;
+    f1_score: number;
+    auc_roc: number | null;
+    test_samples: number;
+    attack_samples: number;
+    benign_samples: number;
+  };
+  confusion_matrix: {
+    labels: string[];
+    matrix: number[][];
+    tn: number;
+    fp: number;
+    fn: number;
+    tp: number;
+  };
+  per_class: Record<string, {
+    precision: number;
+    recall: number;
+    "f1-score": number;
+    support: number;
+  }>;
+  per_class_accuracy?: Record<string, number>;
+}
+
+export interface DatasetInfo {
+  name: string;
+  label: string;
+  csv_count: number;
+  size_bytes: number;
+  size_human: string;
+  downloaded: boolean;
+}
+
+export interface DatasetStats {
+  downloaded: boolean;
+  name: string;
+  total_samples?: number;
+  attack_samples?: number;
+  benign_samples?: number;
+  features?: string[];
+  error?: string;
+}

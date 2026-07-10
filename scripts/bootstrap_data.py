@@ -32,6 +32,38 @@ from loguru import logger
 
 from core.features import FEATURE_COLS
 
+
+# ── Port category helpers (FV2) ──────────────────────────────────────────────
+
+WEB_PORTS = {80, 443, 8080, 8443}
+MAIL_PORTS = {25, 110, 143, 587, 993, 995}
+ADMIN_PORTS = {22, 23, 21, 3389, 5900}
+DB_PORTS = {3306, 5432, 27017, 6379}
+DNS_PORTS = {53}
+
+
+def _port_categories(port: int) -> dict:
+    """FV2: one-hot port category flags."""
+    return {
+        "port_is_web":   int(port in WEB_PORTS),
+        "port_is_mail":  int(port in MAIL_PORTS),
+        "port_is_admin": int(port in ADMIN_PORTS),
+        "port_is_db":    int(port in DB_PORTS),
+        "port_is_dns":   int(port in DNS_PORTS),
+    }
+
+
+def _flag_ratios(fin: int, syn: int, rst: int, psh: int, ack: int, pkt_count: int) -> dict:
+    """FV3: normalised flag ratios (flag_count / packet_count)."""
+    denom = max(pkt_count, 1)
+    return {
+        "syn_ratio": syn / denom,
+        "fin_ratio": fin / denom,
+        "rst_ratio": rst / denom,
+        "ack_ratio": ack / denom,
+        "psh_ratio": psh / denom,
+    }
+
 def generate_benign(n=8000):
     """Generates normal-looking traffic profiles."""
     data = []
@@ -42,7 +74,12 @@ def generate_benign(n=8000):
         pkt_count = random.randint(3, 20)
         src_bytes = pkt_count * random.randint(60, 1500)
         dst_bytes = pkt_count * random.randint(60, 5000)
-        
+        fin_count = random.choice([0, 1])
+        syn_count = 1
+        rst_count = 0
+        psh_count = random.randint(0, 5)
+        ack_count = pkt_count
+
         row = {
             "dst_port": p,
             "duration": duration,
@@ -59,11 +96,13 @@ def generate_benign(n=8000):
             "flow_iat_std": random.uniform(0.01, 0.1),
             "flow_iat_max": duration / 2,
             "flow_iat_min": 0.001,
-            "fin_flag_count": random.choice([0, 1]),
-            "syn_flag_count": 1,
-            "rst_flag_count": 0,
-            "psh_flag_count": random.randint(0, 5),
-            "ack_flag_count": pkt_count,
+            "fin_flag_count": fin_count,
+            "syn_flag_count": syn_count,
+            "rst_flag_count": rst_count,
+            "psh_flag_count": psh_count,
+            "ack_flag_count": ack_count,
+            **_flag_ratios(fin_count, syn_count, rst_count, psh_count, ack_count, pkt_count),
+            **_port_categories(p),
             "label": "BENIGN"
         }
         data.append(row)
@@ -77,14 +116,18 @@ def generate_scan(n=1000):
         duration = random.uniform(0.001, 0.05)
         pkt_count = 1  # Classic one-packet scan
         src_bytes = 40 # Standard SYN packet size
-        dst_bytes = 0
-        
+        fin_count = 0
+        syn_count = 1
+        rst_count = 0
+        psh_count = 0
+        ack_count = 0
+
         row = {
             "dst_port": p,
             "duration": duration,
             "src_bytes": src_bytes,
             "dst_bytes": 0,
-            "packet_count": 1,
+            "packet_count": pkt_count,
             "avg_packet_len": 40.0,
             "std_packet_len": 0,
             "flow_bytes_per_sec": src_bytes / duration,
@@ -95,11 +138,13 @@ def generate_scan(n=1000):
             "flow_iat_std": 0,
             "flow_iat_max": 0,
             "flow_iat_min": 0,
-            "fin_flag_count": 0,
-            "syn_flag_count": 1,
-            "rst_flag_count": 0,
-            "psh_flag_count": 0,
-            "ack_flag_count": 0,
+            "fin_flag_count": fin_count,
+            "syn_flag_count": syn_count,
+            "rst_flag_count": rst_count,
+            "psh_flag_count": psh_count,
+            "ack_flag_count": ack_count,
+            **_flag_ratios(fin_count, syn_count, rst_count, psh_count, ack_count, pkt_count),
+            **_port_categories(p),
             "label": "PortScan"
         }
         data.append(row)
@@ -114,7 +159,12 @@ def generate_brute_force(n=1000):
         pkt_count = random.randint(15, 50)
         src_bytes = pkt_count * 100 # uniform payload size
         dst_bytes = pkt_count * 80
-        
+        fin_count = 0
+        syn_count = 1
+        rst_count = random.choice([0, 1])
+        psh_count = pkt_count // 2
+        ack_count = pkt_count // 2
+
         row = {
             "dst_port": p,
             "duration": duration,
@@ -131,11 +181,13 @@ def generate_brute_force(n=1000):
             "flow_iat_std": 0.001,
             "flow_iat_max": 0.5,
             "flow_iat_min": 0.01,
-            "fin_flag_count": 0,
-            "syn_flag_count": 1,
-            "rst_flag_count": random.choice([0, 1]),
-            "psh_flag_count": pkt_count // 2,
-            "ack_flag_count": pkt_count // 2,
+            "fin_flag_count": fin_count,
+            "syn_flag_count": syn_count,
+            "rst_flag_count": rst_count,
+            "psh_flag_count": psh_count,
+            "ack_flag_count": ack_count,
+            **_flag_ratios(fin_count, syn_count, rst_count, psh_count, ack_count, pkt_count),
+            **_port_categories(p),
             "label": "BruteForce"
         }
         data.append(row)

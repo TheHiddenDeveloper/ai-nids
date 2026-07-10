@@ -252,6 +252,7 @@ class RetrainRequest(BaseModel):
     batch_size: int = Field(default=128, ge=16, le=1024)
     learning_rate: float = Field(default=0.001, gt=0, le=1.0)
     smote_ratio: float = Field(default=1.0, ge=0.0, le=10.0)
+    datasets: list[str] = Field(default=["cicids2017"])
 
 class DeployRequest(BaseModel):
     version: str
@@ -267,7 +268,8 @@ async def retrain_models(request: Request, req: RetrainRequest):
         "--epochs", str(req.epochs),
         "--batch_size", str(req.batch_size),
         "--learning_rate", str(req.learning_rate),
-        "--smote_ratio", str(req.smote_ratio)
+        "--smote_ratio", str(req.smote_ratio),
+        "--dataset", ",".join(req.datasets)
     ]
     job_id = start_job(name=f"Model Retraining ({req.precision})", cmd=cmd)
     return {"job_id": job_id, "status": "started"}
@@ -357,6 +359,101 @@ async def deploy_model_version(request: Request, req: DeployRequest):
         "service_restarted": service_restarted
     }
 
+# -----------------
+# Training Reports API
+# -----------------
+
+REPORTS_DIR = Path("data/models/reports")
+
+@app.get("/api/models/reports")
+@limiter.limit("30/minute")
+async def list_reports(request: Request):
+    if not REPORTS_DIR.exists():
+        return []
+    reports = []
+    for d in sorted(REPORTS_DIR.iterdir(), reverse=True):
+        if d.is_dir() and (d / "report.json").exists():
+            try:
+                with open(d / "report.json") as f:
+                    reports.append(json.load(f))
+            except Exception:
+                continue
+    return reports
+
+@app.get("/api/models/reports/{version}")
+@limiter.limit("30/minute")
+async def get_report(request: Request, version: str):
+    report_file = REPORTS_DIR / version / "report.json"
+    if not report_file.exists():
+        raise HTTPException(status_code=404, detail=f"Report for {version} not found")
+    try:
+        with open(report_file) as f:
+            return json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read report: {e}")
+
+@app.get("/api/models/reports/{version}/images/{name}")
+@limiter.limit("30/minute")
+async def get_report_image(request: Request, version: str, name: str):
+    allowed = {"confusion_matrix.png", "roc_curve.png"}
+    if name not in allowed:
+        raise HTTPException(status_code=400, detail="Invalid image name")
+    img = REPORTS_DIR / version / name
+    if not img.exists():
+        raise HTTPException(status_code=404, detail=f"Image {name} not found for {version}")
+    return Response(content=img.read_bytes(), media_type="image/png")
+
+# -----------------
+# Dataset Info API
+# -----------------
+
+DATASETS_DIR = Path("data/raw")
+
+@app.get("/api/datasets")
+@limiter.limit("30/minute")
+async def list_datasets(request: Request):
+    available = []
+    for name in ("cicids2017", "ciciot2023"):
+        ds_dir = DATASETS_DIR / name
+        csv_files = list(ds_dir.glob("*.csv")) if ds_dir.exists() else []
+        total_bytes = sum(f.stat().st_size for f in csv_files)
+        available.append({
+            "name": name,
+            "label": "CICIDS2017" if name == "cicids2017" else "CICIoT2023",
+            "csv_count": len(csv_files),
+            "size_bytes": total_bytes,
+            "size_human": f"{total_bytes / (1024**2):.1f} MB" if total_bytes else "0 MB",
+            "downloaded": len(csv_files) > 0,
+        })
+    return available
+
+@app.get("/api/datasets/{name}/stats")
+@limiter.limit("10/minute")
+async def get_dataset_stats(request: Request, name: str):
+    if name not in ("cicids2017", "ciciot2023"):
+        raise HTTPException(status_code=400, detail="Unknown dataset")
+    ds_dir = DATASETS_DIR / name
+    if not ds_dir.exists() or not list(ds_dir.glob("*.csv")):
+        return {"downloaded": False, "name": name}
+    try:
+        from ai_engine.dataset import load_cicids2017, load_ciciot2023
+        if name == "cicids2017":
+            df = load_cicids2017(str(ds_dir))
+        else:
+            df = load_ciciot2023(str(ds_dir))
+        total = len(df)
+        n_attack = int(df["is_attack"].sum()) if "is_attack" in df.columns else 0
+        return {
+            "downloaded": True,
+            "name": name,
+            "total_samples": total,
+            "attack_samples": n_attack,
+            "benign_samples": total - n_attack,
+            "features": list(df.columns),
+        }
+    except Exception as e:
+        return {"downloaded": True, "name": name, "error": str(e)}
+
 @app.get("/api/jobs/{job_id}/metrics")
 @limiter.limit("30/minute")
 async def get_job_metrics(request: Request, job_id: str):
@@ -432,6 +529,47 @@ async def toggle_signature(request: Request, rule_id: str, req: SignatureToggle)
         
     return {"status": "success", "rule_id": rule_id, "enabled": req.enabled}
 
+class SignatureUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    severity: str | None = None
+    tags: list[str] | None = None
+    enabled: bool | None = None
+
+@app.put("/api/signatures/{rule_id}")
+@limiter.limit("20/minute")
+async def update_signature(request: Request, rule_id: str, req: SignatureUpdate):
+    with open(RULES_PATH) as f:
+        data = yaml.safe_load(f)
+
+    idx = -1
+    for i, r in enumerate(data.get("rules", [])):
+        if r.get("id") == rule_id:
+            idx = i
+            break
+
+    if idx == -1:
+        raise HTTPException(status_code=404, detail="Rule not found")
+
+    rule = data["rules"][idx]
+    if req.name is not None:
+        rule["name"] = req.name
+    if req.description is not None:
+        rule["description"] = req.description
+    if req.severity is not None:
+        if req.severity not in ("high", "medium", "low"):
+            raise HTTPException(status_code=400, detail="Severity must be high, medium, or low")
+        rule["severity"] = req.severity
+    if req.tags is not None:
+        rule["tags"] = req.tags
+    if req.enabled is not None:
+        rule["enabled"] = req.enabled
+
+    with open(RULES_PATH, "w") as f:
+        yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+    return {"status": "success", "rule_id": rule_id, "rule": rule}
+
 # -----------------
 # System Monitor Control
 # -----------------
@@ -449,6 +587,29 @@ async def restart_monitor(request: Request):
         )
     except FileNotFoundError:
         raise HTTPException(status_code=500, detail="systemctl command not found — is systemd installed?")
+
+# -----------------
+# System Logs
+# -----------------
+
+LOG_FILE = Path("data/nids.log")
+
+@app.get("/api/system/logs")
+@limiter.limit("30/minute")
+async def get_logs(request: Request, lines: int = 100):
+    """Return the last N lines of the system log file."""
+    if not LOG_FILE.exists():
+        return {"lines": [], "total": 0}
+    try:
+        with open(LOG_FILE, "r", errors="replace") as f:
+            all_lines = f.readlines()
+        tail = all_lines[-lines:] if len(all_lines) > lines else all_lines
+        return {
+            "lines": [l.rstrip("\n") for l in tail],
+            "total": len(all_lines),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read logs: {e}")
 
 # Serve the Next.js static export ONLY if it exists (for production)
 out_dir = Path("frontend/out")

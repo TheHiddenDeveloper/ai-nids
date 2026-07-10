@@ -336,8 +336,19 @@ class EnsembleInferenceEngine:
             try:
                 X_rf_scaled = self._scaler.transform(X[rf_idx])
 
+                # Use actual RF feature importances when available (joblib path).
+                # ONNX doesn't expose feature_importances_, fall back to scaled values.
+                if self._rf is not None and hasattr(self._rf, "feature_importances_"):
+                    importances = self._rf.feature_importances_
+                else:
+                    importances = None
+
                 for j, original_idx in enumerate(rf_driven):
-                    scores = np.abs(X_rf_scaled[j])
+                    if importances is not None:
+                        # Weighted by both importance and the sample's scaled value
+                        scores = importances * np.abs(X_rf_scaled[j])
+                    else:
+                        scores = np.abs(X_rf_scaled[j])
                     top_indices = np.argsort(scores)[::-1][:3]
                     explanations[original_idx] = {
                         "driver": "Supervised Random Forest",

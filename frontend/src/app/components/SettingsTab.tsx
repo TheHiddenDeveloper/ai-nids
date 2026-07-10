@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import useSWR from "swr";
 import { X } from "lucide-react";
 import { apiUrl, fetcher } from "../lib/api";
+import { LogsViewer } from "./LogsViewer";
 
 export function SettingsTab() {
   const { data: health, mutate: mutateHealth } = useSWR<{ redis_connected: boolean; models: { random_forest: boolean } }>(apiUrl("/api/settings/health"), fetcher);
@@ -138,6 +139,8 @@ export function SettingsTab() {
           <p className="text-slate-400 text-sm">No active IP blocks across the network.</p>
         )}
       </div>
+
+      <LogsViewer />
 
       <div className="bg-rose-950/20 border border-rose-500/20 rounded-2xl p-6">
         <h2 className="text-lg font-bold text-rose-400 mb-2">Danger Zone</h2>

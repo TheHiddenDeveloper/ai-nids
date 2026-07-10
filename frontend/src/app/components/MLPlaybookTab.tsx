@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import {
   Play,
@@ -15,7 +15,10 @@ import {
   Database,
   Calendar,
   Layers,
-  Sparkles
+  Sparkles,
+  ChevronDown,
+  ChevronUp,
+  BarChart3
 } from "lucide-react";
 import {
   LineChart,
@@ -30,6 +33,8 @@ import {
 
 import type { Job, JobMetrics, ModelVersion, DeploymentStatus } from "../lib/types";
 import { apiUrl, fetcher } from "../lib/api";
+import { TrainingReportPanel } from "./TrainingReportPanel";
+import { DatasetSelector } from "./DatasetSelector";
 
 export function MLPlaybookTab() {
   const { mutate } = useSWRConfig();
@@ -38,6 +43,8 @@ export function MLPlaybookTab() {
   const [batchSize, setBatchSize] = useState<number>(128);
   const [learningRate, setLearningRate] = useState<number>(0.001);
   const [smoteRatio, setSmoteRatio] = useState<number>(1.0);
+  const [selectedDatasets, setSelectedDatasets] = useState<string[]>(["cicids2017"]);
+  const [expandedReport, setExpandedReport] = useState<string | null>(null);
 
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [deployingVersion, setDeployingVersion] = useState<string | null>(null);
@@ -99,7 +106,8 @@ export function MLPlaybookTab() {
           epochs,
           batch_size: batchSize,
           learning_rate: learningRate,
-          smote_ratio: smoteRatio
+          smote_ratio: smoteRatio,
+          datasets: selectedDatasets
         })
       });
       const data = await res.json();
@@ -238,6 +246,12 @@ export function MLPlaybookTab() {
               />
               <p className="text-[10px] text-slate-500 leading-normal">Determines synthetic generation density for anomaly under-samples in the training corpus.</p>
             </div>
+
+            <DatasetSelector
+              selected={selectedDatasets}
+              onChange={setSelectedDatasets}
+              disabled={!!activeJobId}
+            />
 
             <div className="space-y-2">
               <div className="flex justify-between text-xs font-bold text-slate-400 uppercase tracking-wider">
@@ -425,6 +439,7 @@ export function MLPlaybookTab() {
                 <th className="px-6 py-4">Precision</th>
                 <th className="px-6 py-4">Recall</th>
                 <th className="px-6 py-4">F1 Score</th>
+                <th className="px-6 py-4">Report</th>
                 <th className="px-6 py-4 text-right">Deployment Status</th>
               </tr>
             </thead>
@@ -433,9 +448,11 @@ export function MLPlaybookTab() {
                 versions.map((ver: ModelVersion) => {
                   const isCurrent = ver.status === "deployed";
                   const params = ver.hyperparameters || {};
+                  const isReportExpanded = expandedReport === ver.version;
 
                   return (
-                    <tr key={ver.version} className={`hover:bg-slate-800/30 transition-all ${isCurrent ? 'bg-emerald-500/[0.02]' : ''}`}>
+                    <Fragment key={ver.version}>
+                    <tr className={`hover:bg-slate-800/30 transition-all ${isCurrent ? 'bg-emerald-500/[0.02]' : ''}`}>
                       <td className="px-6 py-4 font-mono font-bold text-white flex items-center gap-2">
                         <Layers className="w-3.5 h-3.5 text-cyan-400" />
                         {ver.version}
@@ -461,6 +478,24 @@ export function MLPlaybookTab() {
                       <td className="px-6 py-4 font-mono font-semibold text-emerald-400">
                         {ver.f1_score ? (ver.f1_score * 100).toFixed(1) + "%" : "N/A"}
                       </td>
+                      <td className="px-6 py-4">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedReport(isReportExpanded ? null : ver.version)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[10px] font-bold transition ${
+                            isReportExpanded
+                              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                              : "bg-slate-900 border-white/5 text-slate-500 hover:text-slate-300 hover:border-white/10"
+                          }`}
+                        >
+                          <BarChart3 className="w-3 h-3" />
+                          {isReportExpanded ? (
+                            <ChevronUp className="w-3 h-3" />
+                          ) : (
+                            <ChevronDown className="w-3 h-3" />
+                          )}
+                        </button>
+                      </td>
                       <td className="px-6 py-4 text-right">
                         {isCurrent ? (
                           <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
@@ -484,11 +519,19 @@ export function MLPlaybookTab() {
                         )}
                       </td>
                     </tr>
+                    {isReportExpanded && (
+                      <tr>
+                        <td colSpan={9} className="px-6 py-3 bg-slate-950/30">
+                          <TrainingReportPanel version={ver.version} />
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   );
                 })
               ) : (
                 <tr>
-                  <td colSpan={8} className="px-6 py-8 text-center text-slate-500 italic">
+                  <td colSpan={9} className="px-6 py-8 text-center text-slate-500 italic">
                     {versionsError ? "Failed to load model versions registry." : "No model versions registered. Trigger your first retraining cycle above!"}
                   </td>
                 </tr>

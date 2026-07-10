@@ -1,10 +1,14 @@
 "use client";
+import { useState } from "react";
 import useSWR from "swr";
+import { Pencil } from "lucide-react";
 import type { Signature } from "../lib/types";
 import { apiUrl, fetcher } from "../lib/api";
+import { SignatureRuleEditor } from "./SignatureRuleEditor";
 
 export function SignaturesTab() {
   const { data: rules, error, mutate } = useSWR<Signature[]>(apiUrl("/api/signatures"), fetcher);
+  const [editingRule, setEditingRule] = useState<Signature | null>(null);
 
   const toggleRule = async (ruleId: string, enabled: boolean) => {
     try {
@@ -37,7 +41,7 @@ export function SignaturesTab() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">Signature Rules</h2>
-          <p className="text-slate-400 text-sm mt-1">Manage static detection rules and hot-reload behavior.</p>
+          <p className="text-slate-400 text-sm mt-1">Manage static detection rules and hot-reload behavior. Click any rule to edit.</p>
         </div>
       </div>
 
@@ -55,6 +59,7 @@ export function SignaturesTab() {
                 <th className="px-6 py-4 font-medium text-slate-400">Name</th>
                 <th className="px-6 py-4 font-medium text-slate-400 w-32">Severity</th>
                 <th className="px-6 py-4 font-medium text-slate-400 w-48">Tags</th>
+                <th className="px-6 py-4 font-medium text-slate-400 w-16"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
@@ -92,12 +97,28 @@ export function SignaturesTab() {
                       ))}
                     </div>
                   </td>
+                  <td className="px-6 py-4">
+                    <button
+                      onClick={() => setEditingRule(rule)}
+                      className="p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-slate-800 transition"
+                      aria-label={`Edit rule ${rule.id}`}
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
       </div>
+
+      {editingRule && (
+        <SignatureRuleEditor
+          rule={editingRule}
+          onClose={() => { setEditingRule(null); mutate(); }}
+        />
+      )}
     </div>
   );
 }

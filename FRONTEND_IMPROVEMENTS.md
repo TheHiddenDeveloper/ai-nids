@@ -1,6 +1,6 @@
 # Frontend Improvements — Implementation Log
 
-## Status: ALL COMPLETE
+## Status: ALL 15 COMPLETE
 
 ---
 
@@ -83,6 +83,62 @@
 - [x] Persists preference in localStorage
 - **Files:** `components/ThemeProvider.tsx`, `globals.css`, `page.tsx`
 
+## 10. System Logs Viewer
+- [x] Terminal-style auto-scrolling log panel
+- [x] Live polling via SWR (2s interval)
+- [x] Severity-based color coding (ERROR/RED, WARN/AMBER, INFO/GREEN, ALERT/FUCHSIA)
+- [x] Text filter + line count selector (100/200/500/1000)
+- [x] Auto-scroll toggle button
+- [x] Integrated into Settings tab
+- **Files:** `components/LogsViewer.tsx`, `components/SettingsTab.tsx`
+- **Backend:** `GET /api/system/logs?lines=N` endpoint in `api/main.py`
+
+## 11. Signature Rule Editor
+- [x] Full modal editor for rule properties (name, description, severity, tags, enabled)
+- [x] Severity selector with visual buttons (HIGH/MEDIUM/LOW)
+- [x] Tag add/remove with Enter key support
+- [x] Enabled/disabled toggle switch
+- [x] Save via `PUT /api/signatures/{rule_id}` endpoint
+- [x] SWR cache invalidation on save
+- [x] Escape key closes modal
+- [x] Pencil edit button added to each row in SignaturesTab
+- **Files:** `components/SignatureRuleEditor.tsx`, `components/SignaturesTab.tsx`
+- **Backend:** `PUT /api/signatures/{rule_id}` endpoint in `api/main.py`
+
+## 12. Notification Feed (Toast Panel)
+- [x] Bell icon with active notification count badge
+- [x] Dropdown panel with recent high-severity alerts
+- [x] Severity-colored left border + dot indicators
+- [x] Auto-dismiss individual notifications
+- [x] "Clear all" button
+- [x] Live polling via SWR (5s interval)
+- [x] Integrated into sidebar header
+- **File:** `components/NotificationPanel.tsx`, `page.tsx`
+
+## 13. Export PDF Report
+- [x] Client-side PDF generation via jsPDF
+- [x] Summary section (flows, alerts, critical hits, uptime)
+- [x] Alerts table with severity-colored rows
+- [x] Multi-page support with footer page numbers
+- [x] Button in main content header area
+- **Files:** `components/ExportReport.tsx`, `page.tsx`
+
+## 14. Mobile Bottom Navigation
+- [x] Fixed bottom bar with 6 main tabs (Overview, Alerts, Topology, Rules, Models, Settings)
+- [x] Active indicator dot + label color change
+- [x] Alert count badge on Alerts tab
+- [x] Hidden on desktop (lg:hidden), visible on mobile
+- [x] Safe area bottom padding
+- **File:** `components/BottomNavBar.tsx`, `page.tsx`
+
+## 15. Customizable Dashboard Layout
+- [x] Drag-and-drop widget reordering via @dnd-kit
+- [x] Widget visibility toggle (show/hide any section)
+- [x] Grip handle appears on hover
+- [x] Drag visual feedback (ring + shadow)
+- [x] 4 default widgets: KPI Cards, Alerts Table, Topology Preview, Timeline
+- **Files:** `components/DashboardLayout.tsx`
+
 ---
 
 ## Bug Fix: GeoIP Coordinates
@@ -100,6 +156,12 @@
 | `components/GeoMap.tsx` | Leaflet geo map |
 | `components/AlertTimeline.tsx` | Canvas event timeline |
 | `components/ThemeProvider.tsx` | Dark/light theme context |
+| `components/LogsViewer.tsx` | Terminal-style system log viewer |
+| `components/SignatureRuleEditor.tsx` | Rule edit modal |
+| `components/NotificationPanel.tsx` | Toast notification feed |
+| `components/ExportReport.tsx` | PDF report generator |
+| `components/BottomNavBar.tsx` | Mobile bottom navigation |
+| `components/DashboardLayout.tsx` | DnD widget layout |
 
 ## Files Modified
 | File | Changes |
@@ -107,9 +169,14 @@
 | `components/AlertsTab.tsx` | Search/filter bar, IP click handlers, drilldown modal |
 | `components/IncidentsTab.tsx` | Replaced scatter with Topology/Geo toggle |
 | `components/OverviewTab.tsx` | Added AlertTimeline below existing charts |
-| `page.tsx` | New tab, connection status, keyboard shortcuts, theme provider |
+| `components/SignaturesTab.tsx` | Added edit button, wired to SignatureRuleEditor |
+| `components/SettingsTab.tsx` | Added LogsViewer |
+| `page.tsx` | New tabs, notification panel, export button, mobile nav, header bar |
 | `globals.css` | Theme tokens for dark/light mode |
+| `api/main.py` | `GET /api/system/logs`, `PUT /api/signatures/{rule_id}` endpoints |
 | `core/pipeline.py` | Added `_src_ip_lat`/`_src_ip_lon` to enrichment |
 
 ## Dependencies Added
 - `leaflet` + `react-leaflet` + `@types/leaflet`
+- `jspdf`
+- `@dnd-kit/core` + `@dnd-kit/sortable` + `@dnd-kit/utilities`

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import useSWR from "swr";
-import { ShieldAlert, Activity, BarChart3, Settings as SettingsIcon, Globe2, MonitorPlay, ShieldCheck, Menu, X, Crosshair, Sun, Moon } from "lucide-react";
+import { ShieldAlert, Activity, BarChart3, Settings as SettingsIcon, Globe2, MonitorPlay, ShieldCheck, Menu, X, Crosshair, Sun, Moon, Download } from "lucide-react";
 import { OverviewTab } from "./components/OverviewTab";
 import { AlertsTab } from "./components/AlertsTab";
 import { IncidentsTab } from "./components/IncidentsTab";
@@ -14,6 +14,9 @@ import { MLPlaybookTab } from "./components/MLPlaybookTab";
 import { TopOffendersTab } from "./components/TopOffendersTab";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ThemeProvider, useTheme } from "./components/ThemeProvider";
+import { NotificationPanel } from "./components/NotificationPanel";
+import { ExportReport } from "./components/ExportReport";
+import { BottomNavBar } from "./components/BottomNavBar";
 
 import type { KPIs, Flow, Alert } from "./lib/types";
 import { apiUrl, fetcher } from "./lib/api";
@@ -83,10 +86,13 @@ function Sidebar({
                <ShieldAlert className="w-5 h-5 text-emerald-400" />
              </div>
               <h1 className="text-xl font-bold tracking-tight bg-gradient-to-r from-emerald-400 to-cyan-400 bg-clip-text text-transparent">AI-NIDS</h1>
-              <button onClick={onThemeToggle} className="ml-auto p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
-                {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-              </button>
-              <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 md:hidden" aria-label="Close sidebar">
+               <div className="ml-auto flex items-center gap-1">
+                 <NotificationPanel />
+                 <button onClick={onThemeToggle} className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition" aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>
+                   {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                 </button>
+               </div>
+               <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 md:hidden" aria-label="Close sidebar">
                <X className="w-5 h-5" aria-hidden="true" />
              </button>
            </div>
@@ -244,7 +250,16 @@ function DashboardInner() {
         onThemeToggle={toggle}
       />
 
-      <main className="flex-1 w-full max-w-7xl mx-auto md:px-8 px-4 md:pt-8 pt-16 pb-8 h-screen overflow-y-auto">
+      <main className="flex-1 w-full max-w-7xl mx-auto md:px-8 px-4 md:pt-8 pt-16 pb-24 lg:pb-8 h-screen overflow-y-auto">
+        {/* Mobile header bar */}
+        <div className="flex items-center justify-between mb-6 lg:mb-8">
+          <div>
+            <h2 className="text-xl font-bold text-white capitalize">{activeTab.replace("_", " ")}</h2>
+            <p className="text-xs text-slate-500 mt-0.5">{new Date().toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</p>
+          </div>
+          <ExportReport />
+        </div>
+
         <ErrorBoundary name="Overview tab">
           {activeTab === "overview" && <OverviewTab kpis={kpis} alerts={alerts} />}
         </ErrorBoundary>
@@ -271,6 +286,7 @@ function DashboardInner() {
         </ErrorBoundary>
       </main>
       <TasksWidget />
+      <BottomNavBar activeTab={activeTab} onTabChange={setActiveTab} alertCount={alerts.filter((a: Alert) => a.severity === "high").length} />
     </div>
   );
 }
