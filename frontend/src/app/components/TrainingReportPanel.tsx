@@ -116,6 +116,33 @@ export function TrainingReportPanel({ version }: Props) {
             {overall.benign_samples.toLocaleString()} benign)
           </div>
 
+          {report.datasets_used && report.datasets_used.length > 0 && (
+            <div className="text-[10px] text-slate-500 flex items-center gap-1.5">
+              <span className="font-bold">Datasets:</span>
+              {report.datasets_used.join(" + ")}
+            </div>
+          )}
+
+          {report.attack_types && Object.keys(report.attack_types).length > 0 && (
+            <div className="bg-slate-900 border border-white/5 rounded-xl p-3">
+              <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-2">
+                Training Attack Types ({Object.keys(report.attack_types).length})
+              </div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 max-h-32 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
+                {Object.entries(report.attack_types)
+                  .sort(([, a], [, b]) => b - a)
+                  .map(([label, count]) => (
+                    <div key={label} className="flex justify-between text-[9px] py-0.5">
+                      <span className={`font-mono ${label.toLowerCase().includes("benign") ? "text-emerald-400/70" : "text-slate-400"}`}>
+                        {label}
+                      </span>
+                      <span className="text-slate-600 font-mono">{count.toLocaleString()}</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
           {/* Confusion matrix JSON view */}
           <div className="bg-slate-900 border border-white/5 rounded-xl p-3">
             <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-2">

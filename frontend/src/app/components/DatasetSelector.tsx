@@ -7,6 +7,9 @@ import {
   CheckCircle2,
   AlertTriangle,
   ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  Shield,
 } from "lucide-react";
 import type { DatasetInfo, DatasetStats } from "../lib/types";
 import { apiUrl } from "../lib/api";
@@ -21,6 +24,7 @@ export function DatasetSelector({ selected, onChange, disabled }: Props) {
   const [datasets, setDatasets] = useState<DatasetInfo[]>([]);
   const [stats, setStats] = useState<Record<string, DatasetStats>>({});
   const [loadingStats, setLoadingStats] = useState<string | null>(null);
+  const [expandedAttacks, setExpandedAttacks] = useState<string | null>(null);
 
   useEffect(() => {
     fetch(apiUrl("/api/datasets"))
@@ -143,6 +147,42 @@ export function DatasetSelector({ selected, onChange, disabled }: Props) {
                   <span className="text-emerald-400/60">
                     {dsStats.benign_samples?.toLocaleString()} benign
                   </span>
+                </div>
+              )}
+              {dsStats?.attack_types && Object.keys(dsStats.attack_types).length > 0 && (
+                <div className="mt-1.5">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setExpandedAttacks(expandedAttacks === ds.name ? null : ds.name);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1 text-[9px] text-slate-500 hover:text-slate-300 transition"
+                  >
+                    <Shield className="w-3 h-3" />
+                    {Object.keys(dsStats.attack_types).length} attack types
+                    {expandedAttacks === ds.name ? (
+                      <ChevronUp className="w-3 h-3" />
+                    ) : (
+                      <ChevronDown className="w-3 h-3" />
+                    )}
+                  </button>
+                  {expandedAttacks === ds.name && (
+                    <div className="mx-1 mt-1 bg-slate-950/50 border border-white/5 rounded-lg p-2 max-h-40 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
+                      {Object.entries(dsStats.attack_types)
+                        .sort(([, a], [, b]) => b - a)
+                        .map(([label, count]) => (
+                          <div key={label} className="flex justify-between items-center py-0.5 text-[9px]">
+                            <span className={`font-mono ${label.toLowerCase().includes("benign") ? "text-emerald-400/70" : "text-slate-400"}`}>
+                              {label}
+                            </span>
+                            <span className="text-slate-600 font-mono">
+                              {count.toLocaleString()}
+                            </span>
+                          </div>
+                        ))}
+                    </div>
+                  )}
                 </div>
               )}
               {!isAvailable && isActive && (

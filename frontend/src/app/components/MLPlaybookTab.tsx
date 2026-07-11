@@ -18,7 +18,8 @@ import {
   Sparkles,
   ChevronDown,
   ChevronUp,
-  BarChart3
+  BarChart3,
+  Shield
 } from "lucide-react";
 import {
   LineChart,
@@ -463,8 +464,22 @@ export function MLPlaybookTab() {
                           {ver.timestamp ? new Date(ver.timestamp).toLocaleString() : "N/A"}
                         </span>
                       </td>
-                      <td className="px-6 py-4 font-mono text-[10px] text-slate-400 max-w-[180px] truncate">
-                        e:{params.epochs || 100} | b:{params.batch_size || 128} | lr:{params.learning_rate || 0.001} | s:{params.smote_ratio || 1.0}
+                      <td className="px-6 py-4 font-mono text-[10px] text-slate-400 max-w-[200px]">
+                        <div className="truncate">
+                          e:{params.epochs || 100} | b:{params.batch_size || 128} | lr:{params.learning_rate || 0.001}
+                        </div>
+                        {params.datasets && params.datasets.length > 0 && (
+                          <div className="text-[9px] text-slate-600 mt-0.5 flex items-center gap-1">
+                            <Database className="w-2.5 h-2.5" />
+                            {params.datasets.join(" + ")}
+                          </div>
+                        )}
+                        {ver.attack_types && Object.keys(ver.attack_types).length > 0 && (
+                          <div className="text-[9px] text-slate-600 mt-0.5 flex items-center gap-1">
+                            <Shield className="w-2.5 h-2.5" />
+                            {Object.keys(ver.attack_types).length} attack types
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4 font-mono font-semibold text-slate-300">
                         {ver.accuracy ? (ver.accuracy * 100).toFixed(1) + "%" : "N/A"}

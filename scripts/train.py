@@ -71,7 +71,7 @@ from ai_engine.dataset import FEATURE_COLS, load_cicids2017, load_ciciot2023, lo
 def save_training_report(
     y_test, y_pred, ensemble_scores, rf_scores, ae_scores,
     accuracy, precision, recall, f1, version_name,
-    per_class_acc=None,
+    per_class_acc=None, label_distribution=None, datasets_used=None,
 ):
     """
     Save a comprehensive training report after each run:
@@ -138,6 +138,10 @@ def save_training_report(
     }
     if per_class_acc:
         report["per_class_accuracy"] = per_class_acc
+    if label_distribution:
+        report["attack_types"] = label_distribution
+    if datasets_used:
+        report["datasets_used"] = datasets_used
 
     with open(report_dir / "report.json", "w") as f:
         json.dump(report, f, indent=2)
@@ -438,6 +442,16 @@ def main():
     # 7. Save comprehensive training report (confusion matrix, AUC-ROC, per-class)
     ts = int(time.time())
     version_name = f"v_{ts}"
+
+    # Compute attack type distribution from combined dataset
+    label_dist = {}
+    try:
+        if "label" in df_combined.columns:
+            label_counts = df_combined["label"].value_counts()
+            label_dist = {k: int(v) for k, v in label_counts.items()}
+    except Exception:
+        pass
+
     try:
         save_training_report(
             y_test=y_test,
@@ -451,6 +465,8 @@ def main():
             f1=f1,
             version_name=version_name,
             per_class_acc=per_class if "per_class" in dir() else None,
+            label_distribution=label_dist,
+            datasets_used=dataset_names,
         )
     except Exception as e:
         logger.warning(f"Training report generation failed (non-fatal): {e}")
@@ -502,6 +518,7 @@ def main():
             "research": ", ".join(dataset_names),
             "live_db": not df_live.empty,
         },
+        "attack_types": label_dist,
         "hyperparameters": {
             "precision": args.precision,
             "epochs": args.epochs,

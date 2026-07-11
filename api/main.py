@@ -469,6 +469,11 @@ async def get_dataset_stats(request: Request, name: str):
             df = load_ciciot2023(str(ds_dir))
         total = len(df)
         n_attack = int(df["is_attack"].sum()) if "is_attack" in df.columns else 0
+        # Attack type breakdown
+        attack_types = {}
+        if "label" in df.columns:
+            counts = df["label"].value_counts()
+            attack_types = {k: int(v) for k, v in counts.items()}
         return {
             "downloaded": True,
             "name": name,
@@ -476,6 +481,7 @@ async def get_dataset_stats(request: Request, name: str):
             "attack_samples": n_attack,
             "benign_samples": total - n_attack,
             "features": list(df.columns),
+            "attack_types": attack_types,
         }
     except Exception as e:
         return {"downloaded": True, "name": name, "error": str(e)}

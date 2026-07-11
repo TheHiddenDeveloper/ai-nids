@@ -59,11 +59,18 @@ export interface ModelVersion {
     batch_size?: number;
     learning_rate?: number;
     smote_ratio?: number;
+    datasets?: string[];
   };
   accuracy?: number;
   precision?: number;
   recall?: number;
   f1_score?: number;
+  auc_roc?: number | null;
+  attack_types?: Record<string, number>;
+  data_sources?: {
+    research?: string;
+    live_db?: boolean;
+  };
 }
 
 export interface DeploymentStatus {
@@ -107,6 +114,8 @@ export interface TrainingReport {
     support: number;
   }>;
   per_class_accuracy?: Record<string, number>;
+  attack_types?: Record<string, number>;
+  datasets_used?: string[];
 }
 
 export interface DatasetInfo {
@@ -126,5 +135,6 @@ export interface DatasetStats {
   attack_samples?: number;
   benign_samples?: number;
   features?: string[];
+  attack_types?: Record<string, number>;
   error?: string;
 }

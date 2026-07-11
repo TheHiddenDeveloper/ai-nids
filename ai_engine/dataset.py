@@ -121,9 +121,13 @@ def _add_fv2_from_protocols(df: pd.DataFrame) -> pd.DataFrame:
     Uses protocol-type columns (HTTP, DNS, Telnet, etc.) as proxies.
     """
     if "dst_port" not in df.columns:
-        df["port_is_web"]   = df.get("HTTP", 0).astype(float) | df.get("HTTPS", 0).astype(float)
+        http_val = df.get("HTTP", 0).astype(float)
+        https_val = df.get("HTTPS", 0).astype(float)
+        telnet_val = df.get("Telnet", 0).astype(float)
+        ssh_val = df.get("SSH", 0).astype(float)
+        df["port_is_web"]   = np.clip(http_val + https_val, 0, 1)
         df["port_is_mail"]  = df.get("SMTP", 0).astype(float)
-        df["port_is_admin"] = df.get("Telnet", 0).astype(float) | df.get("SSH", 0).astype(float)
+        df["port_is_admin"] = np.clip(telnet_val + ssh_val, 0, 1)
         df["port_is_db"]    = 0.0  # No DB protocol indicator in CICIoT2023
         df["port_is_dns"]   = df.get("DNS", 0).astype(float)
     return df
@@ -194,16 +198,24 @@ def load_ciciot2023(data_dir: str = "data/raw/ciciot2023") -> pd.DataFrame:
     Load CICIoT2023 CSV files from data_dir into a single DataFrame.
     Maps CICIoT2023-specific columns to our internal FEATURE_COLS schema.
 
+    Handles both directory layouts:
+      - Flat: data/raw/ciciot2023/*.csv
+      - Kaggle split: data/raw/ciciot2023/{train,validation,test}/*.csv
+
     CICIoT2023 uses different column names and has no dst_port column.
     Port categories (FV2) are derived from protocol-type columns instead.
     """
     data_path = Path(data_dir)
+
+    # Find CSVs in both flat layout and subdirectories
     csv_files = list(data_path.glob("*.csv"))
+    for sub in ("train", "validation", "test"):
+        csv_files.extend((data_path / sub).glob("*.csv"))
 
     if not csv_files:
         raise FileNotFoundError(
             f"No CSV files found in {data_dir}.\n"
-            f"Run 'python scripts/fetch_ciciot2023.py' to download."
+            f"Run 'python scripts/fetch_ciciot2023.py' or download from Kaggle."
         )
 
     logger.info(f"Loading {len(csv_files)} CICIoT2023 CSV file(s) from {data_dir}")
