@@ -7,16 +7,18 @@ import { AlertTimeline } from "./AlertTimeline";
 
 function MetricCard({ title, value, delta }: { title: string; value: string | number; delta?: number }) {
   return (
-    <div className="bg-slate-900 border border-white/5 rounded-2xl p-6 relative overflow-hidden group">
-      <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"/>
-      <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2">{title}</h3>
-      <div className="flex items-end gap-3">
-        <span className="text-3xl font-bold tracking-tight text-white">{value}</span>
-        {delta !== undefined && (
-          <span className={`text-sm font-medium mb-1 ${delta >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-            {delta > 0 ? "+" : ""}{delta.toFixed(1)}%
-          </span>
-        )}
+    <div className="bg-slate-900/60 backdrop-blur-sm border border-white/[0.06] rounded-2xl p-6 relative overflow-hidden group hover:border-emerald-500/20 transition-all duration-300">
+      <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/[0.07] to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"/>
+      <div className="relative">
+        <h3 className="text-[11px] font-bold text-slate-500/70 uppercase tracking-[0.15em] mb-3">{title}</h3>
+        <div className="flex items-end gap-3">
+          <span className="text-3xl font-bold tracking-tight text-white">{value}</span>
+          {delta !== undefined && (
+            <span className={`text-sm font-medium mb-1 ${delta >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+              {delta > 0 ? "+" : ""}{delta.toFixed(1)}%
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );

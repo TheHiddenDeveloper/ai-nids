@@ -140,6 +140,16 @@ sudo systemctl enable "$API_SVC"
 
 echo "Restarting services..."
 sudo systemctl restart "$MONITOR_SVC"
+
+# Ensure data/ files are readable by the non-root API process
+# (monitor runs as root and creates root-owned SQLite files)
+sleep 2
+if [ -d "$PROJECT_ROOT/data" ]; then
+  sudo chmod -R a+rX "$PROJECT_ROOT/data"
+  sudo chmod a+w "$PROJECT_ROOT/data"
+  echo "✅ Data directory permissions updated for non-root API access"
+fi
+
 sudo systemctl restart "$API_SVC"
 
 echo "✅ Deployment Complete!"

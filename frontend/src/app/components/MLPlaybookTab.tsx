@@ -36,6 +36,7 @@ import type { Job, JobMetrics, ModelVersion } from "../lib/types";
 import { apiUrl, fetcher } from "../lib/api";
 import { TrainingReportPanel } from "./TrainingReportPanel";
 import { DatasetSelector } from "./DatasetSelector";
+import { MLPlaybookSkeleton } from "./Skeleton";
 
 export function MLPlaybookTab() {
   const { mutate } = useSWRConfig();
@@ -120,6 +121,8 @@ export function MLPlaybookTab() {
   };
 
   const deployedModel = versions?.find((v: ModelVersion) => v.status === "deployed");
+
+  if (!versions && !versionsError) return <MLPlaybookSkeleton />;
 
   return (
     <div className="space-y-8">

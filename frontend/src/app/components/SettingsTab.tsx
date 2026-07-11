@@ -1,18 +1,20 @@
 "use client";
 import { useState, useEffect } from "react";
 import useSWR from "swr";
-import { X } from "lucide-react";
+import { X, RotateCcw, Brain, Trash2, Loader2 } from "lucide-react";
 import { apiUrl, fetcher } from "../lib/api";
 import { LogsViewer } from "./LogsViewer";
+import { SettingsSkeleton } from "./Skeleton";
 
 export function SettingsTab() {
   const { data: health, mutate: mutateHealth } = useSWR<{ redis_connected: boolean; models: { random_forest: boolean } }>(apiUrl("/api/settings/health"), fetcher);
   const { data: ips, mutate: mutateIps } = useSWR<string[]>(apiUrl("/api/settings/blocked_ips"), fetcher);
   const [notification, setNotification] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [loadingAction, setLoadingAction] = useState<string | null>(null);
 
   useEffect(() => {
     if (notification) {
-      const t = setTimeout(() => setNotification(null), 4000);
+      const t = setTimeout(() => setNotification(null), 5000);
       return () => clearTimeout(t);
     }
   }, [notification]);
@@ -31,7 +33,8 @@ export function SettingsTab() {
         mutateHealth();
         notify(`${ip} ${action === "unblock" ? "unblocked" : "blocked"} successfully.`, "success");
       } else {
-        notify(`Failed to ${action} ${ip}.`, "error");
+        const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+        notify(`Failed to ${action} ${ip}: ${err.detail || res.statusText}`, "error");
       }
     } catch {
       notify(`Network error during firewall action.`, "error");
@@ -39,34 +42,43 @@ export function SettingsTab() {
   };
 
   const wipeSystem = async () => {
-    if (!confirm("Are you sure? This deletes ALL alerts and logs!")) return;
+    if (!confirm("Are you sure? This deletes ALL alerts, flows, and incidents!")) return;
+    setLoadingAction("wipe");
     try {
       const res = await fetch(apiUrl("/api/settings/wipe"), { method: "POST" });
       if (res.ok) {
-        notify("System Data Wiped Successfully.", "success");
+        notify("System data wiped successfully.", "success");
       } else {
-        notify("Failed to wipe system data.", "error");
+        const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+        notify(`Failed to wipe: ${err.detail}`, "error");
       }
     } catch {
       notify("Network error during wipe.", "error");
+    } finally {
+      setLoadingAction(null);
     }
   };
 
   const restartMonitor = async () => {
     if (!confirm("Restart the monitor service? This will briefly interrupt traffic analysis.")) return;
+    setLoadingAction("restart");
     try {
       const res = await fetch(apiUrl("/api/system/monitor/restart"), { method: "POST" });
       if (res.ok) {
-        notify("Restart initiated.", "success");
+        notify("Monitor restarted successfully.", "success");
       } else {
-        notify("Failed to restart monitor.", "error");
+        const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+        notify(`Failed to restart: ${err.detail}`, "error");
       }
     } catch {
       notify("Network error during restart.", "error");
+    } finally {
+      setLoadingAction(null);
     }
   };
 
   const retrainModels = async () => {
+    setLoadingAction("retrain");
     try {
       const res = await fetch(apiUrl("/api/models/retrain"), {
         method: "POST",
@@ -76,12 +88,17 @@ export function SettingsTab() {
       if (res.ok) {
         notify("Retraining job started. Check Tasks Widget.", "success");
       } else {
-        notify("Failed to start retraining.", "error");
+        const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+        notify(`Failed to start retraining: ${err.detail}`, "error");
       }
     } catch {
       notify("Network error during retrain request.", "error");
+    } finally {
+      setLoadingAction(null);
     }
   };
+
+  if (!health && !ips) return <SettingsSkeleton />;
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
@@ -113,10 +130,20 @@ export function SettingsTab() {
            </div>
         </div>
         <div className="mt-4 flex gap-3">
-          <button onClick={restartMonitor} className="bg-slate-700 hover:bg-slate-600 text-white text-sm font-medium px-4 py-2 rounded-xl transition">
+          <button
+            onClick={restartMonitor}
+            disabled={loadingAction === "restart"}
+            className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-xl transition"
+          >
+            {loadingAction === "restart" ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
             Restart Monitor Service
           </button>
-          <button onClick={retrainModels} className="bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 border border-cyan-500/30 text-sm font-medium px-4 py-2 rounded-xl transition">
+          <button
+            onClick={retrainModels}
+            disabled={loadingAction === "retrain"}
+            className="flex items-center gap-2 bg-cyan-500/20 hover:bg-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed text-cyan-400 border border-cyan-500/30 text-sm font-medium px-4 py-2 rounded-xl transition"
+          >
+            {loadingAction === "retrain" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Brain className="w-4 h-4" />}
             Retrain AI Models
           </button>
         </div>
@@ -145,7 +172,12 @@ export function SettingsTab() {
       <div className="bg-rose-950/20 border border-rose-500/20 rounded-2xl p-6">
         <h2 className="text-lg font-bold text-rose-400 mb-2">Danger Zone</h2>
         <p className="text-sm text-rose-400/70 mb-4">Destructive actions regarding system persistence.</p>
-        <button onClick={wipeSystem} className="bg-rose-500 hover:bg-rose-600 text-white font-medium px-4 py-2 rounded-xl transition">
+        <button
+          onClick={wipeSystem}
+          disabled={loadingAction === "wipe"}
+          className="flex items-center gap-2 bg-rose-500 hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium px-4 py-2 rounded-xl transition"
+        >
+          {loadingAction === "wipe" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
           Wipe System Data
         </button>
       </div>

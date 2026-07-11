@@ -14,7 +14,8 @@ Functions:
   send_firewall_command(action, ip)   — Redis pub/sub to FirewallEngine
 
 Design:
-  - SQLite reads are direct (no ORM), with raw_json column for JSON deserialization
+  - Read-only connections via file: URI to avoid WAL SHM contention when
+    the monitor (root) and API (non-root) share the same SQLite DB.
   - get_comparison_stats(): H2 — queries structured columns (severity) for
     high/medium count, not raw_json parsing
   - send_firewall_command() publishes to "nids:commands" Redis channel
@@ -33,12 +34,21 @@ from core.redis_client import get_redis_client
 
 DB_PATH = Path("data/nids.db")
 
+# URI for read-only access — avoids WAL SHM contention with root-owned DB
+_DB_URI = f"file:{DB_PATH.resolve()}?mode=ro"
+
+
+def _get_ro_conn() -> sqlite3.Connection:
+    """Open a read-only SQLite connection via file: URI."""
+    return sqlite3.connect(_DB_URI, uri=True, check_same_thread=False)
+
+
 def load_from_db(table: str, limit: int = 2000, offset: int = 0) -> list:
     """H3: fetch records from SQLite with offset/limit pagination."""
     if not DB_PATH.exists():
         return []
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = _get_ro_conn()
         cur = conn.cursor()
         cur.execute(
             f"SELECT raw_json FROM {table} ORDER BY timestamp DESC LIMIT ? OFFSET ?",
@@ -59,13 +69,14 @@ def count_rows(table: str) -> int:
     if not DB_PATH.exists():
         return 0
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = _get_ro_conn()
         cur = conn.cursor()
         cur.execute(f"SELECT count(*) FROM {table}")
         row = cur.fetchone()
         conn.close()
         return row[0] if row else 0
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error counting {table}: {e}")
         return 0
 
 def load_incidents(limit: int = 100) -> list:
@@ -73,7 +84,7 @@ def load_incidents(limit: int = 100) -> list:
     if not DB_PATH.exists():
         return []
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = _get_ro_conn()
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         cur.execute(f"SELECT * FROM incidents ORDER BY end_time DESC LIMIT ?", (limit,))
@@ -89,7 +100,7 @@ def get_comparison_stats() -> dict:
     if not DB_PATH.exists(): return None
     
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = _get_ro_conn()
         now = time.time()
         c24 = now - 86400
         p24 = c24 - 86400

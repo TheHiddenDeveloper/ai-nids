@@ -5,6 +5,7 @@ import { Pencil } from "lucide-react";
 import type { Signature } from "../lib/types";
 import { apiUrl, fetcher } from "../lib/api";
 import { SignatureRuleEditor } from "./SignatureRuleEditor";
+import { SignaturesSkeleton } from "./Skeleton";
 
 export function SignaturesTab() {
   const { data: rules, error, mutate } = useSWR<Signature[]>(apiUrl("/api/signatures"), fetcher);
@@ -34,7 +35,7 @@ export function SignaturesTab() {
     );
   }
 
-  if (!rules) return <div className="text-slate-400 p-8">Loading signatures...</div>;
+  if (!rules) return <SignaturesSkeleton />;
 
   return (
     <div className="space-y-6">

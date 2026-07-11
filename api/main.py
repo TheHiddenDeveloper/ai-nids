@@ -224,10 +224,15 @@ async def firewall_action(request: Request, action: FirewallAction):
 @app.post("/api/settings/wipe")
 @limiter.limit("2/minute")
 async def wipe_database(request: Request):
-    success = clear_db_data()
-    if not success:
-        raise HTTPException(status_code=500, detail="Failed to wipe database")
-    return {"status": "success"}
+    try:
+        success = clear_db_data()
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to wipe database. The database files may be owned by another user (e.g. root). Run: sudo chmod -R a+rw data/")
+        return {"status": "success"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to wipe database: {e}. Try: sudo chmod -R a+rw data/")
 
 # -----------------
 # Jobs & Background Tasks
@@ -609,16 +614,21 @@ async def update_signature(request: Request, rule_id: str, req: SignatureUpdate)
 @app.post("/api/system/monitor/restart")
 @limiter.limit("1/minute")
 async def restart_monitor(request: Request):
+    import shutil
+    sudo_path = shutil.which("sudo") or "/usr/bin/sudo"
+    systemctl_path = shutil.which("systemctl") or "/usr/bin/systemctl"
     try:
-        subprocess.run(["sudo", "systemctl", "restart", "ai-nids-monitor.service"], check=True)
+        subprocess.run([sudo_path, systemctl_path, "restart", "ai-nids-monitor.service"], check=True, timeout=15)
         return {"status": "success"}
     except subprocess.CalledProcessError as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to restart monitor: {e}. Ensure the API user has NOPASSWD sudo for systemctl restart ai-nids-monitor.service"
+            detail=f"Failed to restart monitor: {e}. Ensure sudo is configured for systemctl."
         )
     except FileNotFoundError:
-        raise HTTPException(status_code=500, detail="systemctl command not found — is systemd installed?")
+        raise HTTPException(status_code=500, detail="systemctl or sudo not found. Is systemd installed?")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=500, detail="Restart command timed out")
 
 # -----------------
 # System Logs

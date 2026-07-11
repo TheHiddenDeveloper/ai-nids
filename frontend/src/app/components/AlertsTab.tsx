@@ -296,6 +296,7 @@ export function AlertsTab({ alerts }: { alerts: Alert[] }) {
               <tr>
                 <th className="px-6 py-4">Timestamp</th>
                 <th className="px-6 py-4">Severity</th>
+                <th className="px-6 py-4">Detection</th>
                 <th className="px-6 py-4">Source IP</th>
                 <th className="px-6 py-4">Target IP</th>
                 <th className="px-6 py-4">Confidence Score</th>
@@ -326,6 +327,48 @@ export function AlertsTab({ alerts }: { alerts: Alert[] }) {
                       }`}>
                         {alert.severity.toUpperCase()}
                       </span>
+                    </td>
+                    <td className="px-6 py-4">
+                      {(() => {
+                        let sigName: string | null = null;
+                        if (alert.signature_match) {
+                          try {
+                            const parsed = typeof alert.signature_match === 'string' ? JSON.parse(alert.signature_match) : alert.signature_match;
+                            sigName = Array.isArray(parsed) ? parsed[0]?.name : parsed?.name;
+                          } catch { /* ignore */ }
+                        }
+                        if (sigName) {
+                          return (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                              <ShieldCheck className="w-3 h-3" />
+                              {sigName}
+                            </span>
+                          );
+                        }
+                        const driver = alert.explanation?.driver;
+                        if (driver?.includes("Random Forest")) {
+                          return (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                              <Cpu className="w-3 h-3" />
+                              RF Classifier
+                            </span>
+                          );
+                        }
+                        if (driver?.includes("Autoencoder")) {
+                          return (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider bg-fuchsia-500/10 text-fuchsia-400 border border-fuchsia-500/20">
+                              <Cpu className="w-3 h-3" />
+                              AE Anomaly
+                            </span>
+                          );
+                        }
+                        return (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            <ShieldAlert className="w-3 h-3" />
+                            AI Detection
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-6 py-4 font-mono text-cyan-400 font-semibold">
                       <button

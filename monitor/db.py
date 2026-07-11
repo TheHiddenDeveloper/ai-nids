@@ -176,7 +176,8 @@ def cleanup_old_data(retention_days: int = 30):
         with conn:
             conn.execute("DELETE FROM flows WHERE timestamp < ?", (cutoff,))
             conn.execute("DELETE FROM alerts WHERE timestamp < ?", (cutoff,))
-        # VACUUM outside the transaction to avoid blocking
+        # WAL checkpoint + VACUUM outside the transaction to avoid blocking
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         conn.execute("VACUUM")
         return True
     except Exception as e:

@@ -17,11 +17,27 @@ export interface Alert {
   threat_level?: string;
   _src_ip_lat?: number;
   _src_ip_lon?: number;
+  label?: string;
+  model_label?: string;
+  confidence?: number;
+  signature_match?: string;
+  direction?: string;
+  suppression_note?: string;
+  is_malicious?: boolean;
+  _timestamp?: number;
 }
 
 export interface AlertExplanation {
   driver: string;
   features: { name: string; score: number }[];
+}
+
+export interface SignatureMatch {
+  rule_id: string;
+  name: string;
+  severity: string;
+  tags: string[];
+  description: string;
 }
 
 export interface Flow {
@@ -52,7 +68,7 @@ export interface JobMetrics {
 
 export interface ModelVersion {
   version: string;
-  timestamp?: string;
+  timestamp?: number;
   status: "deployed" | "available";
   hyperparameters?: {
     epochs?: number;
