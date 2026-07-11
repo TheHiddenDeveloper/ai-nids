@@ -260,6 +260,11 @@ class DeployRequest(BaseModel):
 @app.post("/api/models/retrain")
 @limiter.limit("2/minute")
 async def retrain_models(request: Request, req: RetrainRequest):
+    valid_datasets = {"cicids2017", "ciciot2023", "both"}
+    for ds in req.datasets:
+        if ds not in valid_datasets:
+            raise HTTPException(status_code=400, detail=f"Invalid dataset '{ds}'. Choose from: {', '.join(sorted(valid_datasets))}")
+
     venv_py = Path("ai-venv/bin/python")
     python_bin = str(venv_py) if venv_py.exists() else sys.executable
     cmd = [
@@ -269,7 +274,7 @@ async def retrain_models(request: Request, req: RetrainRequest):
         "--batch_size", str(req.batch_size),
         "--learning_rate", str(req.learning_rate),
         "--smote_ratio", str(req.smote_ratio),
-        "--dataset", ",".join(req.datasets)
+        "--dataset", *req.datasets
     ]
     job_id = start_job(name=f"Model Retraining ({req.precision})", cmd=cmd)
     return {"job_id": job_id, "status": "started"}
@@ -409,21 +414,39 @@ async def get_report_image(request: Request, version: str, name: str):
 
 DATASETS_DIR = Path("data/raw")
 
+def _count_valid_csvs(ds_dir: Path) -> tuple[int, int]:
+    """Count CSV files and total size, excluding HTML pages masquerading as CSVs."""
+    csv_files = list(ds_dir.glob("*.csv"))
+    valid = []
+    for f in csv_files:
+        try:
+            with open(f, "rb") as fh:
+                header = fh.read(256)
+            lower = header.lower().strip()
+            if not lower.startswith((b"<!doctype", b"<html", b"<html", b"<?xml", b"<head")):
+                valid.append(f)
+        except Exception:
+            pass
+    total_bytes = sum(f.stat().st_size for f in valid)
+    return len(valid), total_bytes
+
 @app.get("/api/datasets")
 @limiter.limit("30/minute")
 async def list_datasets(request: Request):
     available = []
     for name in ("cicids2017", "ciciot2023"):
         ds_dir = DATASETS_DIR / name
-        csv_files = list(ds_dir.glob("*.csv")) if ds_dir.exists() else []
-        total_bytes = sum(f.stat().st_size for f in csv_files)
+        csv_count, total_bytes = _count_valid_csvs(ds_dir) if ds_dir.exists() else (0, 0)
+        raw_count = len(list(ds_dir.glob("*.csv"))) if ds_dir.exists() else 0
+        has_invalid = raw_count > csv_count
         available.append({
             "name": name,
             "label": "CICIDS2017" if name == "cicids2017" else "CICIoT2023",
-            "csv_count": len(csv_files),
+            "csv_count": csv_count,
             "size_bytes": total_bytes,
             "size_human": f"{total_bytes / (1024**2):.1f} MB" if total_bytes else "0 MB",
-            "downloaded": len(csv_files) > 0,
+            "downloaded": csv_count > 0,
+            "has_invalid_files": has_invalid,
         })
     return available
 
@@ -433,7 +456,10 @@ async def get_dataset_stats(request: Request, name: str):
     if name not in ("cicids2017", "ciciot2023"):
         raise HTTPException(status_code=400, detail="Unknown dataset")
     ds_dir = DATASETS_DIR / name
-    if not ds_dir.exists() or not list(ds_dir.glob("*.csv")):
+    if not ds_dir.exists():
+        return {"downloaded": False, "name": name}
+    valid_count, _ = _count_valid_csvs(ds_dir)
+    if valid_count == 0:
         return {"downloaded": False, "name": name}
     try:
         from ai_engine.dataset import load_cicids2017, load_ciciot2023

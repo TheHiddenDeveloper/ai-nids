@@ -116,6 +116,7 @@ export interface DatasetInfo {
   size_bytes: number;
   size_human: string;
   downloaded: boolean;
+  has_invalid_files?: boolean;
 }
 
 export interface DatasetStats {

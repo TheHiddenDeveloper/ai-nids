@@ -1,7 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Database, HardDrive, CheckCircle2, AlertTriangle } from "lucide-react";
+import {
+  Database,
+  HardDrive,
+  CheckCircle2,
+  AlertTriangle,
+  ExternalLink,
+} from "lucide-react";
 import type { DatasetInfo, DatasetStats } from "../lib/types";
 import { apiUrl } from "../lib/api";
 
@@ -42,6 +48,8 @@ export function DatasetSelector({ selected, onChange, disabled }: Props) {
 
   const toggle = (name: string) => {
     if (disabled) return;
+    const ds = datasets.find((d) => d.name === name);
+    if (ds && !ds.downloaded) return;
     const next = selected.includes(name)
       ? selected.filter((d) => d !== name)
       : [...selected, name];
@@ -62,6 +70,7 @@ export function DatasetSelector({ selected, onChange, disabled }: Props) {
         {datasets.map((ds) => {
           const isActive = selected.includes(ds.name);
           const dsStats = stats[ds.name];
+          const isAvailable = ds.downloaded && !ds.has_invalid_files;
           return (
             <div key={ds.name}>
               <button
@@ -70,35 +79,35 @@ export function DatasetSelector({ selected, onChange, disabled }: Props) {
                   toggle(ds.name);
                   loadStats(ds.name);
                 }}
-                disabled={disabled}
+                disabled={disabled || !isAvailable}
                 className={`w-full text-left px-3 py-2.5 rounded-xl border transition-all duration-150 ${
-                  isActive
+                  isActive && isAvailable
                     ? "bg-emerald-500/[0.06] border-emerald-500/30"
                     : "bg-slate-950 border-white/5 hover:border-white/10"
-                } ${disabled ? "opacity-55 cursor-not-allowed" : "cursor-pointer"}`}
+                } ${disabled || !isAvailable ? "opacity-55" : "cursor-pointer"}`}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div
                       className={`w-3.5 h-3.5 rounded border-2 flex items-center justify-center transition ${
-                        isActive
+                        isActive && isAvailable
                           ? "bg-emerald-500 border-emerald-500"
                           : "border-slate-600"
                       }`}
                     >
-                      {isActive && (
+                      {isActive && isAvailable && (
                         <CheckCircle2 className="w-2.5 h-2.5 text-white" />
                       )}
                     </div>
                     <Database
                       className={`w-3.5 h-3.5 ${
-                        isActive ? "text-emerald-400" : "text-slate-500"
+                        isActive && isAvailable ? "text-emerald-400" : "text-slate-500"
                       }`}
                     />
                     <div>
                       <span
                         className={`text-xs font-bold ${
-                          isActive ? "text-white" : "text-slate-400"
+                          isActive && isAvailable ? "text-white" : "text-slate-400"
                         }`}
                       >
                         {ds.label}
@@ -109,15 +118,15 @@ export function DatasetSelector({ selected, onChange, disabled }: Props) {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    {ds.downloaded ? (
+                    {isAvailable ? (
                       <span className="flex items-center gap-1 text-[9px] text-emerald-500/70">
                         <HardDrive className="w-3 h-3" />
                         {ds.size_human}
                       </span>
                     ) : (
-                      <span className="flex items-center gap-1 text-[9px] text-slate-600">
+                      <span className="flex items-center gap-1 text-[9px] text-amber-500/70">
                         <AlertTriangle className="w-3 h-3" />
-                        Not downloaded
+                        {ds.has_invalid_files ? "Invalid files" : "Not downloaded"}
                       </span>
                     )}
                   </div>
@@ -134,6 +143,34 @@ export function DatasetSelector({ selected, onChange, disabled }: Props) {
                   <span className="text-emerald-400/60">
                     {dsStats.benign_samples?.toLocaleString()} benign
                   </span>
+                </div>
+              )}
+              {!isAvailable && isActive && (
+                <div className="mt-1.5 mx-1 p-2.5 bg-amber-500/[0.06] border border-amber-500/20 rounded-lg text-[10px] text-amber-400/80 space-y-1">
+                  <div className="font-bold text-amber-400">
+                    {ds.has_invalid_files
+                      ? "Downloaded files are not valid CSVs (HTML pages from server)."
+                      : "Dataset not yet downloaded."}
+                  </div>
+                  <div className="text-amber-400/60 space-y-0.5">
+                    <div className="font-bold text-amber-400/80">Quick start (Kaggle):</div>
+                    <code className="block bg-slate-950/50 px-2 py-1 rounded text-[9px] font-mono">
+                      pip install kaggle && kaggle datasets download -d himadri07/ciciot2023 --unzip -p data/raw/ciciot2023
+                    </code>
+                    <div className="mt-1">
+                      Or download manually from{" "}
+                      <a
+                        href="https://www.kaggle.com/datasets/himadri07/ciciot2023"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline inline-flex items-center gap-0.5 hover:text-amber-300"
+                      >
+                        Kaggle <ExternalLink className="w-2.5 h-2.5" />
+                      </a>{" "}
+                      and extract CSVs into{" "}
+                      <code className="font-mono">data/raw/{ds.name}/</code>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
