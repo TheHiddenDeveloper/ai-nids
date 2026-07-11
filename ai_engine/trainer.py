@@ -115,7 +115,7 @@ def train_random_forest(
         from skl2onnx.common.data_types import FloatTensorType
         onnx_path = Path(model_dir) / "nids_model.onnx"
         initial_type = [('float_input', FloatTensorType([None, X_train_s.shape[1]]))]
-        onx = convert_sklearn(rf, initial_types=initial_type)
+        onx = convert_sklearn(rf, initial_types=initial_type, options={rf.__class__.__name__: {"zipmap": False}})
         with open(onnx_path, 'wb') as f:
             f.write(onx.SerializeToString())
         logger.info(f"Exported RF to ONNX → {onnx_path}")

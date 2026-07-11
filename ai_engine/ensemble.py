@@ -258,8 +258,14 @@ class EnsembleInferenceEngine:
         X_s = self._scaler.transform(X).astype(np.float32)
         if self._rf_onnx is not None:
             input_name = self._rf_onnx.get_inputs()[0].name
-            proba = self._rf_onnx.run(None, {input_name: X_s})[1]
-            return proba[:, 1]
+            outputs = self._rf_onnx.run(None, {input_name: X_s})
+            # skl2onnx default: zipmap → list of dicts [{"0": p0, "1": p1}, ...]
+            # with zipmap=False: ndarray of shape (n, 2)
+            proba = outputs[1]
+            if isinstance(proba, np.ndarray) and proba.ndim == 2:
+                return proba[:, 1]
+            # zipmap format: list of dicts
+            return np.array([p.get("1", p.get(1, 0.0)) for p in proba], dtype=np.float64)
         return self._rf.predict_proba(X_s)[:, 1]
 
     def _ae_score(self, X: np.ndarray, X_scaled: np.ndarray = None) -> np.ndarray:
