@@ -1,21 +1,28 @@
 #!/usr/bin/env python3
 """
-Generate Test PCAP
-------------------
-Creates a synthetic .pcap file containing known attack patterns so you
-can test the full pipeline end-to-end without needing live traffic or
-root permissions.
+================================================================================
+GENERATE TEST PCAP — Synthetic Attack Traffic
+================================================================================
+Purpose:
+  Creates a synthetic .pcap file containing known attack patterns for testing
+  the full end-to-end pipeline without live traffic or root permissions.
 
-Includes:
-  - Normal HTTP/HTTPS traffic (benign baseline)
-  - SYN flood pattern (should trigger SYN_FLOOD_001)
-  - Port scan pattern (should trigger PORT_SCAN_001)
-  - Traffic to bad ports: 445, 4444 (should trigger signature rules)
-  - C2 beacon pattern (tiny periodic flows)
+Patterns:
+  - Normal HTTP/HTTPS traffic (benign baseline — 30 flows)
+  - SYN flood from 10.0.0.99 (triggers SYN_FLOOD_001)
+  - Port scan from 10.0.0.50 (triggers PORT_SCAN_001)
+  - SMB (port 445), Meterpreter (4444), Telnet (23) — triggers bad-port rules
+  - C2 beacon from 192.168.1.77 (triggers C2_BEACON_001)
 
 Usage:
-    python scripts/gen_test_pcap.py
-    python scripts/gen_test_pcap.py --out data/raw/my_test.pcap
+  python scripts/gen_test_pcap.py
+  python scripts/gen_test_pcap.py --out data/raw/my_test.pcap
+
+Design:
+  - Uses scapy to construct raw Ether/IP/TCP/UDP packets with explicit timestamps
+  - gen_packets() returns list of scapy packets sorted by timestamp
+  - Also imported by demo.py for on-the-fly pcap generation
+================================================================================
 """
 
 import sys

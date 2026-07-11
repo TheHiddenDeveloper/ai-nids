@@ -1,3 +1,20 @@
+"""
+================================================================================
+TEST: VERIFY LABELS — Signature Match Labeling in AlertEngine
+================================================================================
+Purpose:
+  Tests that process_results() correctly re-labels BENIGN model results as
+  ATTACK when they match a signature rule, and preserves the original model
+  label as model_label.
+
+  Regression test: ensures that signature-matched alerts always get label=ATTACK
+  even when the ML model says BENIGN.
+
+Run:
+  python tests/verify_labels.py    # standalone
+================================================================================
+"""
+
 import sys
 from pathlib import Path
 
@@ -21,8 +38,8 @@ def test_signature_match_labels():
     
     # Mock signature checker that returns a match
     class MockChecker:
-        def check(self, flow):
-            return "Test Signature: Malicious activity detected"
+        def check_with_metadata(self, flow):
+            return [{"severity": "high", "name": "Test Signature", "description": "Malicious activity detected"}]
             
     alerts = process_results(results, signature_checker=MockChecker())
     

@@ -1,3 +1,14 @@
+# ==============================================================================
+# AI-NIDS FastAPI Backend Service
+# ==============================================================================
+# REST API for the frontend dashboard. Serves Next.js static export at /.
+# Depends on the monitor service being started first.
+#
+# Template variables (replaced by scripts/deploy.sh):
+#   {{PROJECT_ROOT}}  — absolute path to project root
+#   {{USER}}          — current user (does NOT run as root)
+# ==============================================================================
+
 [Unit]
 Description=AI-NIDS FastAPI Backend
 After=network.target ai-nids-monitor.service

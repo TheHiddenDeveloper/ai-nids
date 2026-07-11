@@ -1,3 +1,21 @@
+"""
+================================================================================
+TEST: CORRELATION — Incident Grouping and Eviction
+================================================================================
+Purpose:
+  Integration test for IncidentCorrelator. Tests grouping multiple alerts
+  from the same source IP into a single incident, severity escalation, and
+  stale incident eviction after the inactivity window.
+
+Run:
+  python tests/test_correlation.py    # standalone (calls clear_db_data!)
+  pytest tests/test_correlation.py -v
+
+WARNING:
+  test_correlation.py calls clear_db_data() which DELETES ALL DATA from SQLite.
+================================================================================
+"""
+
 import sys
 import time
 from pathlib import Path

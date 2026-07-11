@@ -1,5 +1,20 @@
 """
-Unit Tests — FlowAggregator
+================================================================================
+TEST: FLOW AGGREGATOR — Packet Grouping + Feature Computation
+================================================================================
+Purpose:
+  Unit tests for Flow class (packet ingestion, statistics computation, flow
+  direction, re-orientation) and FlowAggregator (flow creation, expiry, flush).
+
+Run:
+  pytest tests/test_flow_aggregator.py -v
+
+Test classes:
+  TestFlowCreation      — basic packet ingestion, feature computation
+  TestFlowDirection     — inbound/outbound/internal/external classification
+  TestFlowReorientation — TCP SYN-based and non-TCP port-based reorientation
+  TestFlowAggregator    — ingest, flush_expired, flush_all, direction preservation
+================================================================================
 """
 
 import time
@@ -62,12 +77,13 @@ class TestFlushAndFeatures:
         agg.flush_all()
         assert agg.active_flow_count == 0
 
-    def test_single_packet_flow_not_returned(self):
-        """Flows with < 2 packets produce no features."""
+    def test_single_packet_flow_returned(self):
+        """Single-packet flows now produce features (F5)."""
         agg = FlowAggregator(flow_timeout=60)
         agg.ingest(make_pkt())
         completed = agg.flush_all()
-        assert len(completed) == 0
+        assert len(completed) == 1
+        assert completed[0]["packet_count"] == 1
 
 
 class TestFeatureValues:

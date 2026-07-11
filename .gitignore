@@ -22,7 +22,7 @@ data/processed/
 data/flows.jsonl
 data/alerts.jsonl
 data/nids.log
-data/nids.db
+data/nids.db*
 data/*.csv
 
 # Jupyter
@@ -45,3 +45,4 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+*.log.gz

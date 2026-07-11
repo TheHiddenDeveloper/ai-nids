@@ -1,3 +1,21 @@
+"""
+================================================================================
+TEST: REDIS FLOWS — Distributed Flow Aggregation
+================================================================================
+Purpose:
+  Tests distributed flow aggregation via Redis. Verifies that flows created
+  across multiple FlowAggregator instances sync to the same Redis hash and
+  accumulate packet counts correctly.
+
+Run:
+  python tests/test_redis_flows.py    # standalone (skips if Redis unavailable)
+
+DEPENDENCIES:
+  - Redis must be running
+  - Calls flushdb() which wipes Redis DB 0
+================================================================================
+"""
+
 import time
 import sys
 from pathlib import Path

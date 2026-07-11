@@ -1,0 +1,200 @@
+{
+  "info": {
+    "name": "AI-NIDS API",
+    "description": "Complete API collection for the AI-NIDS backend. Base URL: http://localhost:8000",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "KPIs & Dashboard",
+      "item": [
+        {
+          "name": "Get KPIs",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/kpis",
+            "description": "Uptime, alert counts, comparison stats"
+          }
+        },
+        {
+          "name": "Get Alerts",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/alerts?limit=50"
+          }
+        },
+        {
+          "name": "Get Flows",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/flows?limit=50"
+          }
+        },
+        {
+          "name": "Get Incidents",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/incidents?limit=10"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Settings & Health",
+      "item": [
+        {
+          "name": "Engine Health",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/settings/health"
+          }
+        },
+        {
+          "name": "Blocked IPs",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/settings/blocked_ips"
+          }
+        },
+        {
+          "name": "Block IP",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/settings/firewall",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"action\": \"block\", \"ip\": \"10.0.0.99\"}"
+            }
+          }
+        },
+        {
+          "name": "Unblock IP",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/settings/firewall",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"action\": \"unblock\", \"ip\": \"10.0.0.99\"}"
+            }
+          }
+        },
+        {
+          "name": "Wipe Database",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/settings/wipe"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Model Management",
+      "item": [
+        {
+          "name": "Get Model Versions",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/models/versions"
+          }
+        },
+        {
+          "name": "Retrain Models",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/models/retrain",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"precision\": \"standard\", \"epochs\": 5, \"batch_size\": 128, \"learning_rate\": 0.001, \"smote_ratio\": 1.0}"
+            }
+          }
+        },
+        {
+          "name": "Deploy Model Version",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/models/deploy",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"version\": \"v1.0.0\"}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Jobs & Training",
+      "item": [
+        {
+          "name": "List All Jobs",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/jobs"
+          }
+        },
+        {
+          "name": "Get Job Details",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/jobs/{job_id}",
+            "description": "Replace {job_id} with an actual job ID"
+          }
+        },
+        {
+          "name": "Get Job Metrics",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/jobs/{job_id}/metrics",
+            "description": "Loss/val_loss per epoch for training jobs"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Signatures",
+      "item": [
+        {
+          "name": "List Signatures",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/signatures"
+          }
+        },
+        {
+          "name": "Toggle Signature",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/signatures/{rule_id}/toggle",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"enabled\": false}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "System",
+      "item": [
+        {
+          "name": "Restart Monitor Service",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/system/monitor/restart"
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    }
+  ]
+}

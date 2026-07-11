@@ -5,16 +5,24 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "npm run build && npx serve@latest -s out -l 3000",
+    "start": "npx serve@latest -s out -l 3000",
     "lint": "eslint"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@types/leaflet": "^1.9.21",
     "clsx": "^2.1.1",
+    "jspdf": "^4.2.1",
+    "leaflet": "^1.9.4",
     "lucide-react": "^1.8.0",
     "next": "16.2.3",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "react-leaflet": "^5.0.0",
     "recharts": "^3.8.1",
+    "serve": "^14.2.6",
     "swr": "^2.4.1",
     "tailwind-merge": "^3.5.0"
   },
@@ -25,7 +33,6 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.3",
-    "serve": "^14.2.6",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

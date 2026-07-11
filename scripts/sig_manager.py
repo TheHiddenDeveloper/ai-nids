@@ -1,27 +1,36 @@
 #!/usr/bin/env python3
 """
-Signature Manager CLI
----------------------
-Manage the NIDS signature rule database without editing YAML by hand.
+================================================================================
+SIGNATURE MANAGER CLI — Rule Management Without YAML Editing
+================================================================================
+Purpose:
+  Manage the signature rules database (signatures/rules.yaml) from the command
+  line without manually editing YAML files. Provides list, show, test, enable,
+  disable, and stats commands.
+
+Usage:
+  python scripts/sig_manager.py list
+  python scripts/sig_manager.py list --tag c2
+  python scripts/sig_manager.py list --enabled-only
+  python scripts/sig_manager.py show SYN_FLOOD_001
+  python scripts/sig_manager.py test PORT_SCAN_001
+  python scripts/sig_manager.py enable DNS_EXFIL_001
+  python scripts/sig_manager.py disable BAD_PORT_VNC
+  python scripts/sig_manager.py stats
 
 Commands:
-    list                    List all rules (with status and tags)
-    list --tag dos          Filter by tag
-    list --enabled-only     Only show enabled rules
-    show <RULE_ID>          Show full details of one rule
-    test <RULE_ID>          Test a rule against a simulated flow
-    enable  <RULE_ID>       Enable a disabled rule
-    disable <RULE_ID>       Disable a rule without deleting it
-    stats                   Show rule counts by severity and tag
+  list              List all rules (with color-coded status and tags)
+  show <RULE_ID>    Full details: conditions, severity, tags, description
+  test <RULE_ID>    Test rule against a simulated flow (reports FIRED or not)
+  enable <RULE_ID>  Enable a disabled rule (updates rules.yaml)
+  disable <RULE_ID> Disable a rule without deleting it
+  stats             Counts by severity and tag with bar charts
 
-Usage examples:
-    python scripts/sig_manager.py list
-    python scripts/sig_manager.py list --tag c2
-    python scripts/sig_manager.py show SYN_FLOOD_001
-    python scripts/sig_manager.py test PORT_SCAN_001
-    python scripts/sig_manager.py enable DNS_EXFIL_001
-    python scripts/sig_manager.py disable BAD_PORT_VNC
-    python scripts/sig_manager.py stats
+Design:
+  - Color-coded terminal output (RED=high, YELLOW=medium, CYAN=low)
+  - `test` command builds a simulated flow that should trigger all conditions
+  - Directly reads/writes rules.yaml (not through SignatureChecker)
+================================================================================
 """
 
 import sys

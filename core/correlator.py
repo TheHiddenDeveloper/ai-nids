@@ -1,8 +1,23 @@
 """
-Incident Correlation Engine
----------------------------
-Groups multiple alerts from the same source into high-level Incidents.
-Uses a sliding time window to track active attack sessions.
+================================================================================
+INCIDENT CORRELATOR — Alert-to-Incident Grouping
+================================================================================
+Purpose:
+  Groups multiple alerts from the same source IP into higher-level "Incidents".
+  An incident represents an active attack session (e.g., "SYN flood from 10.0.0.99").
+
+Usage:
+  correlator = IncidentCorrelator(inactivity_window=180)
+  incident_id = correlator.process_alert(alert_dict, intel_dict)
+
+Design:
+  - C1: grouping is controlled by `group_by` (list of alert fields), default ["_src_ip"]
+  - C2: at most `max_startup_incidents` resumed from SQLite on init (default 100)
+  - C3: only alerts with severity >= `min_severity` create incidents
+  - Incidents persist to SQLite (incidents table) with enrichment fields
+  - evict_stale() closes incidents that exceed inactivity_window (default 180s)
+  - Returns incident_id for DB linking; 0 if below min_severity threshold
+================================================================================
 """
 
 import time
@@ -32,22 +47,44 @@ class IncidentCorrelator:
     """
     Stateful correlator that groups alerts into incidents.
     Persists incident status to SQLite.
+
+    C1: grouping is controlled by `group_by` — a list of alert field names
+        whose values are joined to form the incident key (default ["_src_ip"]).
+        Example: group_by=["_src_ip", "dst_ip"] splits by pair.
+    C2: at most `max_startup_incidents` are resumed from DB on init.
+    C3: only alerts with severity >= `min_severity` create incidents.
     """
 
-    def __init__(self, inactivity_window: int = 180):
+    SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2}
+
+    def __init__(
+        self,
+        inactivity_window: int = 180,
+        group_by: Optional[List[str]] = None,
+        max_startup_incidents: int = 100,
+        min_severity: str = "low",
+    ):
         self.inactivity_window = inactivity_window
+        self.group_by = group_by or ["_src_ip"]
+        self.max_startup_incidents = max_startup_incidents
+        self.min_severity = min_severity
         self.conn = get_db_connection()
-        # memory: src_ip -> Incident object
         self.active_incidents: Dict[str, Incident] = {}
-        
-        # Pull recently active incidents from DB on startup to maintain state across restarts
+
         self._resume_active_incidents()
 
+    def _incident_key(self, alert: dict) -> str:
+        parts = [str(alert.get(f, "unknown")) for f in self.group_by]
+        return "|".join(parts)
+
     def _resume_active_incidents(self):
-        """Load 'active' incidents from the DB into memory."""
+        """C2: load at most `max_startup_incidents` active incidents on startup."""
         try:
             cursor = self.conn.execute(
-                "SELECT id, src_ip, start_time, end_time, max_severity FROM incidents WHERE status = 'active'"
+                "SELECT id, src_ip, start_time, end_time, max_severity "
+                "FROM incidents WHERE status = 'active' "
+                "ORDER BY start_time DESC LIMIT ?",
+                (self.max_startup_incidents,)
             )
             for row in cursor.fetchall():
                 iid, ip, start, end, sev = row
@@ -55,26 +92,31 @@ class IncidentCorrelator:
                 inc.last_seen = end or start
                 self.active_incidents[ip] = inc
             if self.active_incidents:
-                logger.info(f"Correlator: Resumed {len(self.active_incidents)} active incidents from DB")
+                logger.info(f"Correlator: Resumed {len(self.active_incidents)} active incidents from DB (limit={self.max_startup_incidents})")
         except Exception as e:
             logger.error(f"Correlator: Failed to resume active incidents: {e}")
 
     def process_alert(self, alert: dict, intel: dict = None, now: float = None) -> int:
         """
         Groups an alert into an incident and returns the incident_id.
+
+        C3: returns 0 (no incident) if severity < min_severity.
         """
-        src_ip = alert.get("_src_ip", "unknown")
         severity = alert.get("severity", "low")
+        if self.SEVERITY_ORDER.get(severity, -1) < self.SEVERITY_ORDER.get(self.min_severity, 0):
+            return 0
+
+        src_ip = alert.get("_src_ip", "unknown")
+        key = self._incident_key(alert)
+
         if now is None:
             now = time.time()
 
-        if src_ip in self.active_incidents:
-            # Update existing incident
-            incident = self.active_incidents[src_ip]
+        if key in self.active_incidents:
+            incident = self.active_incidents[key]
             incident.last_seen = now
             incident.alert_count += 1
-            
-            # Sync intel if not already set or changed
+
             if intel:
                 incident.country = intel.get("country")
                 incident.countryCode = intel.get("countryCode")
@@ -82,15 +124,12 @@ class IncidentCorrelator:
                 incident.asn = intel.get("asn")
                 incident.threat_level = intel.get("threat_level")
 
-            # Escalate severity if needed
-            sev_map = {"low": 0, "medium": 1, "high": 2}
-            if sev_map.get(severity, 0) > sev_map.get(incident.severity, 0):
+            if self.SEVERITY_ORDER.get(severity, 0) > self.SEVERITY_ORDER.get(incident.severity, 0):
                 incident.severity = severity
 
             self._update_incident_db(incident)
             return incident.id
         else:
-            # Create new incident
             iid = self._create_incident_db(src_ip, now, severity, intel)
             incident = Incident(iid, src_ip, now, severity)
             if intel:
@@ -99,7 +138,7 @@ class IncidentCorrelator:
                 incident.city = intel.get("city")
                 incident.asn = intel.get("asn")
                 incident.threat_level = intel.get("threat_level")
-            self.active_incidents[src_ip] = incident
+            self.active_incidents[key] = incident
             return iid
 
     def _create_incident_db(self, src_ip: str, start_time: float, severity: str, intel: dict = None) -> int:

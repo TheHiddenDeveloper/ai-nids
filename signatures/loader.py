@@ -1,10 +1,32 @@
 """
-Signature Loader
-----------------
-Parses rules.yaml into a list of compiled Rule objects.
-Each Rule.matches(flow) evaluates all conditions against a flow dict.
+================================================================================
+SIGNATURE LOADER — YAML Rule Parser + Matcher
+================================================================================
+Purpose:
+  Parses signatures/rules.yaml into a list of compiled Rule objects. Each Rule
+  has a list of Conditions; a rule matches when ALL conditions evaluate to true
+  (logical AND).
 
-Supports operators: gt, lt, gte, lte, eq, neq, in, not_in, contains
+Usage:
+  rules = load_rules("signatures/rules.yaml")
+  for rule in rules:
+      if rule.matches(flow_dict):
+          print(rule.name)
+
+Supported operators:
+  gt, lt, gte, lte, eq, neq, in, not_in, contains
+
+Rule dataclass:
+  id, name, description, severity, enabled, tags, conditions[]
+
+Condition dataclass:
+  field (str), op (str), value (any) — evaluate(flow) -> bool
+
+Design:
+  - Operator registry (OPS dict) maps operator strings to lambda functions
+  - Malformed rules (missing keys) are skipped with a warning
+  - Rule matching short-circuits on first false condition (all() builtin)
+================================================================================
 """
 
 import re

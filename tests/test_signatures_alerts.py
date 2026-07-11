@@ -1,5 +1,18 @@
 """
-Unit Tests — SignatureChecker & AlertEngine
+================================================================================
+TEST: SIGNATURES + ALERTS — SignatureChecker & AlertEngine
+================================================================================
+Purpose:
+  Unit tests for SignatureChecker (rule matching) and AlertEngine (severity
+  classification, signature enrichment, alert filtering).
+
+Run:
+  pytest tests/test_signatures_alerts.py -v
+
+Test classes:
+  TestSignatureChecker — individual rule matching (SYN flood, port scan, etc.)
+  TestAlertEngine      — classify_severity thresholds, process_results merge logic
+================================================================================
 """
 
 import sys
@@ -17,19 +30,19 @@ class TestSignatureChecker:
         self.checker = SignatureChecker()
 
     def test_syn_flood_detected(self):
-        flow = {"syn_flag_count": 100, "ack_flag_count": 1}
+        flow = {"syn_flag_count": 100, "ack_flag_count": 1, "direction": "inbound"}
         result = self.checker.check(flow)
         assert result is not None
         assert "SYN flood" in result
 
     def test_port_scan_detected(self):
-        flow = {"rst_flag_count": 50, "syn_flag_count": 0, "ack_flag_count": 0}
+        flow = {"rst_flag_count": 50, "direction": "inbound"}
         result = self.checker.check(flow)
         assert result is not None
         assert "Port scan" in result
 
     def test_bad_port_detected(self):
-        flow = {"_dst_port": 445}
+        flow = {"_dst_port": 445, "direction": "inbound"}
         result = self.checker.check(flow)
         assert result is not None
         assert "port" in result.lower()
@@ -40,18 +53,18 @@ class TestSignatureChecker:
             "rst_flag_count": 0, "fin_flag_count": 1,
             "packet_count": 20, "duration": 5.0,
             "flow_bytes_per_sec": 500,
-            "_dst_port": 443,
+            "_dst_port": 443, "direction": "outbound",
         }
         assert self.checker.check(flow) is None
 
     def test_check_all_returns_list(self):
-        flow = {"syn_flag_count": 100, "ack_flag_count": 0, "_dst_port": 445}
+        flow = {"syn_flag_count": 100, "ack_flag_count": 0, "_dst_port": 445, "direction": "inbound"}
         matches = self.checker.check_all(flow)
         assert isinstance(matches, list)
         assert len(matches) >= 2
 
     def test_fin_scan_detected(self):
-        flow = {"fin_flag_count": 10, "syn_flag_count": 0, "ack_flag_count": 0}
+        flow = {"fin_flag_count": 10, "syn_flag_count": 0, "ack_flag_count": 0, "direction": "inbound"}
         result = self.checker.check(flow)
         assert result is not None
 
@@ -91,7 +104,7 @@ class TestAlertEngine:
 
     def test_signature_escalates_to_high(self):
         checker = SignatureChecker()
-        results = [{"score": 0.30, "label": "BENIGN", "syn_flag_count": 200, "ack_flag_count": 0}]
+        results = [{"score": 0.30, "label": "BENIGN", "syn_flag_count": 200, "ack_flag_count": 0, "direction": "inbound"}]
         alerts = process_results(results, signature_checker=checker)
         assert len(alerts) == 1
         assert alerts[0]["severity"] == "high"

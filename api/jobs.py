@@ -1,3 +1,26 @@
+"""
+================================================================================
+BACKGROUND JOBS — Async Subprocess Management
+================================================================================
+Purpose:
+  Manages asynchronous background jobs (e.g., model retraining) via asyncio
+  subprocess. Job output is captured and stored in memory for querying via
+  the API.
+
+Usage:
+  job_id = start_job(name="Retrain", cmd=["python", "scripts/train.py", ...])
+  job = get_job(job_id)
+  all_jobs = list_jobs()
+
+Design:
+  - Jobs run via asyncio.create_subprocess_exec (non-blocking)
+  - stdout and stderr are read concurrently via asyncio.gather
+  - Job status: Running → Completed/Failed (based on return code)
+  - Jobs stored in a module-level dict (JOBS) — in-memory, lost on restart
+  - Job metrics (epoch/loss/val_loss) parsed from output via regex [METRIC] pattern
+================================================================================
+"""
+
 import asyncio
 import uuid
 import time

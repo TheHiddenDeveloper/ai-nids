@@ -1,30 +1,101 @@
+"""
+================================================================================
+FASTAPI APPLICATION — REST API for AI-NIDS
+================================================================================
+Purpose:
+  FastAPI backend that powers the Next.js dashboard. Provides REST endpoints
+  for querying alerts, flows, incidents, model health, signatures, jobs, and
+  firewall control. Serves the Next.js static export at / when available.
+
+Endpoints:
+  GET  /api/kpis                  — comparison stats + uptime
+  GET  /api/alerts                — paginated alerts (limit, offset)
+  GET  /api/flows                 — paginated flows
+  GET  /api/incidents             — incident list
+  GET  /api/settings/health       — model + Redis health check
+  GET  /api/settings/blocked_ips  — currently blocked IPs
+  POST /api/settings/firewall     — block/unblock IP
+  POST /api/settings/wipe         — clear all data
+  GET  /api/jobs                  — list background jobs
+  GET  /api/jobs/{id}             — job status + output
+  GET  /api/jobs/{id}/metrics     — training metrics
+  POST /api/models/retrain        — trigger model retraining
+  GET  /api/models/versions       — model version registry
+  POST /api/models/deploy         — deploy specific version
+  GET  /api/signatures            — list all rules
+  POST /api/signatures/{id}/toggle — enable/disable rule
+  POST /api/system/monitor/restart — restart systemd service
+
+Design:
+  - H4 + O7: optional API key auth via X-API-Key header (loaded from config.yaml)
+  - OP9: rate limiting per-endpoint via slowapi (no default_limits to avoid
+    throttling the static frontend)
+  - Rate limits: KPIs/Alerts 100/min, Incidents 60/min, Retrain 2/min, Wipe 2/min
+  - H5: atomic deploy — write .tmp suffix then os.replace (atomic on same fs)
+  - Frontend served from frontend/out if exists (static export)
+================================================================================
+"""
+
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+import os
 import time
 import json
 import shutil
 import re
 
 from api.data import (
-    load_from_db, load_incidents, get_comparison_stats,
+    load_from_db, count_rows, load_incidents, get_comparison_stats,
     send_firewall_command
 )
 from core.redis_client import get_redis_client
+from core.config_validator import validate_config
 from monitor.db import clear_db_data
 from api.jobs import start_job, get_job, list_jobs
 from signatures.loader import load_rules
 import yaml
 import subprocess
+from loguru import logger
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+# H4 + O7: optional API key + config validation
+API_KEY = None
+try:
+    with open("config.yaml") as f:
+        cfg = yaml.safe_load(f) or {}
+    if not validate_config(cfg):
+        import logging
+        logging.warning("config.yaml validation failed — continuing with loaded values")
+    API_KEY = cfg.get("api", {}).get("key") or None
+except Exception:
+    pass
 
 app = FastAPI(title="AI-NIDS API", version="1.0.0")
 
-# Enable CORS for local Next.js development
+# OP9: rate limiting per-endpoint (no default_limits — would throttle static frontend)
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+if API_KEY:
+    @app.middleware("http")
+    async def api_key_middleware(request: Request, call_next):
+        if request.url.path.startswith("/api/"):
+            key = request.headers.get("X-API-Key")
+            if key != API_KEY:
+                return Response(status_code=403, content='{"detail":"Invalid or missing API key"}', media_type="application/json")
+        return await call_next(request)
+    print(f"API key authentication enabled")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -47,16 +118,12 @@ class FirewallAction(BaseModel):
 # -----------------
 
 @app.get("/api/kpis")
-async def get_kpis():
+@limiter.limit("100/minute")
+async def get_kpis(request: Request):
     comp = get_comparison_stats()
     uptime_secs = time.time() - START_TIME
-    
-    # Calculate some basic metrics by peeking at db
-    flows = load_from_db("flows", limit=1)
-    alerts = load_from_db("alerts", limit=5000)
-    
-    total_alerts = len(alerts)
-    high_count = sum(1 for a in alerts if a.get("severity") in ("high", "medium"))
+    total_alerts = count_rows("alerts")
+    high_count = sum(1 for a in load_from_db("alerts", limit=5000) if a.get("severity") in ("high", "medium"))
     
     return {
         "uptime_seconds": uptime_secs,
@@ -66,33 +133,77 @@ async def get_kpis():
     }
 
 @app.get("/api/alerts")
-async def get_alerts(limit: int = 2000):
-    return load_from_db("alerts", limit=limit)
+@limiter.limit("100/minute")
+async def get_alerts(request: Request, limit: int = 200, offset: int = 0, response: Response = None):
+    data = load_from_db("alerts", limit=limit, offset=offset)
+    if response is not None:
+        response.headers["X-Total-Count"] = str(count_rows("alerts"))
+    return data
 
 @app.get("/api/flows")
-async def get_flows(limit: int = 5000):
-    return load_from_db("flows", limit=limit)
+@limiter.limit("100/minute")
+async def get_flows(request: Request, limit: int = 200, offset: int = 0, response: Response = None):
+    data = load_from_db("flows", limit=limit, offset=offset)
+    if response is not None:
+        response.headers["X-Total-Count"] = str(count_rows("flows"))
+    return data
 
 @app.get("/api/incidents")
-async def get_incidents(limit: int = 100):
+@limiter.limit("60/minute")
+async def get_incidents(request: Request, limit: int = 100):
     return load_incidents(limit=limit)
 
 @app.get("/api/settings/health")
-async def get_engine_health():
+@limiter.limit("30/minute")
+async def get_engine_health(request: Request):
     redis_conn = get_redis_client()
-    rf_exists = Path("data/models/nids_model.joblib").exists()
-    ae_exists = Path("data/models/autoencoder.keras").exists()
-    
+    models_dir = Path("data/models")
+    rf_path  = models_dir / "nids_model.joblib"
+    ae_path  = models_dir / "autoencoder.keras"
+    rf_valid = False
+    ae_valid = False
+
+    # Model sanity check: try loading RF and making a prediction
+    if rf_path.exists():
+        try:
+            from joblib import load as jload
+            from sklearn.preprocessing import StandardScaler
+            scaler_path = models_dir / "scaler.joblib"
+            rf_model = jload(rf_path)
+            scaler = jload(scaler_path) if scaler_path.exists() else None
+            from core.features import FEATURE_COLS
+            import numpy as np
+            dummy = np.zeros((1, len(FEATURE_COLS)), dtype=np.float32)
+            if scaler:
+                dummy = scaler.transform(dummy)
+            rf_model.predict(dummy)
+            rf_valid = True
+        except Exception as e:
+            rf_valid = f"error: {e}"
+
+    if ae_path.exists():
+        try:
+            from tensorflow.keras.models import load_model
+            ae_model = load_model(ae_path)
+            from core.features import FEATURE_COLS
+            import numpy as np
+            dummy = np.zeros((1, len(FEATURE_COLS)), dtype=np.float32)
+            ae_model.predict(dummy, verbose=0)
+            ae_valid = True
+        except Exception as e:
+            ae_valid = f"error: {e}"
+
     return {
         "redis_connected": bool(redis_conn),
         "models": {
-            "random_forest": rf_exists,
-            "autoencoder": ae_exists
+            "random_forest": {"exists": rf_path.exists(), "healthy": rf_valid},
+            "autoencoder":  {"exists": ae_path.exists(), "healthy": ae_valid},
         }
     }
 
 @app.get("/api/settings/blocked_ips")
-async def get_blocked_ips():
+@limiter.limit("30/minute")
+async def get_blocked_ips(request: Request):
     redis_conn = get_redis_client()
     if not redis_conn:
         return []
@@ -101,7 +212,8 @@ async def get_blocked_ips():
     return sorted(list(blocked))
 
 @app.post("/api/settings/firewall")
-async def firewall_action(action: FirewallAction):
+@limiter.limit("10/minute")
+async def firewall_action(request: Request, action: FirewallAction):
     if action.action not in ["block", "unblock"]:
         raise HTTPException(status_code=400, detail="Invalid action")
     success = send_firewall_command(action.action, action.ip)
@@ -110,7 +222,8 @@ async def firewall_action(action: FirewallAction):
     return {"status": "success", "action": action.action, "ip": action.ip}
 
 @app.post("/api/settings/wipe")
-async def wipe_database():
+@limiter.limit("2/minute")
+async def wipe_database(request: Request):
     success = clear_db_data()
     if not success:
         raise HTTPException(status_code=500, detail="Failed to wipe database")
@@ -121,28 +234,37 @@ async def wipe_database():
 # -----------------
 
 @app.get("/api/jobs")
-async def get_all_jobs():
+@limiter.limit("30/minute")
+async def get_all_jobs(request: Request):
     return list_jobs()
 
 @app.get("/api/jobs/{job_id}")
-async def get_single_job(job_id: str):
+@limiter.limit("30/minute")
+async def get_single_job(request: Request, job_id: str):
     job = get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
 
 class RetrainRequest(BaseModel):
-    precision: str = "high" # "standard" or "high"
-    epochs: int = 100
-    batch_size: int = 128
-    learning_rate: float = 0.001
-    smote_ratio: float = 1.0
+    precision: str = Field(default="high", pattern="^(standard|high)$")
+    epochs: int = Field(default=100, ge=1, le=1000)
+    batch_size: int = Field(default=128, ge=16, le=1024)
+    learning_rate: float = Field(default=0.001, gt=0, le=1.0)
+    smote_ratio: float = Field(default=1.0, ge=0.0, le=10.0)
+    datasets: list[str] = Field(default=["cicids2017"])
 
 class DeployRequest(BaseModel):
     version: str
 
 @app.post("/api/models/retrain")
-async def retrain_models(req: RetrainRequest):
+@limiter.limit("2/minute")
+async def retrain_models(request: Request, req: RetrainRequest):
+    valid_datasets = {"cicids2017", "ciciot2023", "both"}
+    for ds in req.datasets:
+        if ds not in valid_datasets:
+            raise HTTPException(status_code=400, detail=f"Invalid dataset '{ds}'. Choose from: {', '.join(sorted(valid_datasets))}")
+
     venv_py = Path("ai-venv/bin/python")
     python_bin = str(venv_py) if venv_py.exists() else sys.executable
     cmd = [
@@ -151,13 +273,15 @@ async def retrain_models(req: RetrainRequest):
         "--epochs", str(req.epochs),
         "--batch_size", str(req.batch_size),
         "--learning_rate", str(req.learning_rate),
-        "--smote_ratio", str(req.smote_ratio)
+        "--smote_ratio", str(req.smote_ratio),
+        "--dataset", *req.datasets
     ]
     job_id = start_job(name=f"Model Retraining ({req.precision})", cmd=cmd)
     return {"job_id": job_id, "status": "started"}
 
 @app.get("/api/models/versions")
-async def get_model_versions():
+@limiter.limit("30/minute")
+async def get_model_versions(request: Request):
     registry_path = Path("data/models/registry.json")
     if not registry_path.exists():
         return []
@@ -168,7 +292,8 @@ async def get_model_versions():
         raise HTTPException(status_code=500, detail=f"Failed to read registry: {e}")
 
 @app.post("/api/models/deploy")
-async def deploy_model_version(req: DeployRequest):
+@limiter.limit("5/minute")
+async def deploy_model_version(request: Request, req: DeployRequest):
     model_dir = Path("data/models")
     registry_path = model_dir / "registry.json"
     if not registry_path.exists():
@@ -201,16 +326,17 @@ async def deploy_model_version(req: DeployRequest):
         "ae_threshold.joblib"
     ]
     
+    # H5: atomic copy — write to .tmp suffix, then rename (atomic on same fs)
     try:
         for art in artifacts:
             src = version_dir / art
-            dst = model_dir / art
-            if src.exists():
-                if src.is_dir():
-                    shutil.copytree(src, dst, dirs_exist_ok=True)
-                else:
-                    shutil.copy(src, dst)
+            if not src.exists():
+                continue
+            tmp = model_dir / (art + ".deploy_tmp")
+            shutil.copy2(src, tmp)
+            os.replace(tmp, model_dir / art)
     except Exception as e:
+        logger.error(f"Deploy copy failed: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to copy model artifacts: {e}")
         
     for entry in registry:
@@ -238,8 +364,131 @@ async def deploy_model_version(req: DeployRequest):
         "service_restarted": service_restarted
     }
 
+# -----------------
+# Training Reports API
+# -----------------
+
+REPORTS_DIR = Path("data/models/reports")
+
+@app.get("/api/models/reports")
+@limiter.limit("30/minute")
+async def list_reports(request: Request):
+    if not REPORTS_DIR.exists():
+        return []
+    reports = []
+    for d in sorted(REPORTS_DIR.iterdir(), reverse=True):
+        if d.is_dir() and (d / "report.json").exists():
+            try:
+                with open(d / "report.json") as f:
+                    reports.append(json.load(f))
+            except Exception:
+                continue
+    return reports
+
+@app.get("/api/models/reports/{version}")
+@limiter.limit("30/minute")
+async def get_report(request: Request, version: str):
+    report_file = REPORTS_DIR / version / "report.json"
+    if not report_file.exists():
+        raise HTTPException(status_code=404, detail=f"Report for {version} not found")
+    try:
+        with open(report_file) as f:
+            return json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read report: {e}")
+
+@app.get("/api/models/reports/{version}/images/{name}")
+@limiter.limit("30/minute")
+async def get_report_image(request: Request, version: str, name: str):
+    allowed = {"confusion_matrix.png", "roc_curve.png"}
+    if name not in allowed:
+        raise HTTPException(status_code=400, detail="Invalid image name")
+    img = REPORTS_DIR / version / name
+    if not img.exists():
+        raise HTTPException(status_code=404, detail=f"Image {name} not found for {version}")
+    return Response(content=img.read_bytes(), media_type="image/png")
+
+# -----------------
+# Dataset Info API
+# -----------------
+
+DATASETS_DIR = Path("data/raw")
+
+def _count_valid_csvs(ds_dir: Path) -> tuple[int, int]:
+    """Count CSV files and total size, excluding HTML pages masquerading as CSVs."""
+    csv_files = list(ds_dir.glob("*.csv"))
+    valid = []
+    for f in csv_files:
+        try:
+            with open(f, "rb") as fh:
+                header = fh.read(256)
+            lower = header.lower().strip()
+            if not lower.startswith((b"<!doctype", b"<html", b"<html", b"<?xml", b"<head")):
+                valid.append(f)
+        except Exception:
+            pass
+    total_bytes = sum(f.stat().st_size for f in valid)
+    return len(valid), total_bytes
+
+@app.get("/api/datasets")
+@limiter.limit("30/minute")
+async def list_datasets(request: Request):
+    available = []
+    for name in ("cicids2017", "ciciot2023"):
+        ds_dir = DATASETS_DIR / name
+        csv_count, total_bytes = _count_valid_csvs(ds_dir) if ds_dir.exists() else (0, 0)
+        raw_count = len(list(ds_dir.glob("*.csv"))) if ds_dir.exists() else 0
+        has_invalid = raw_count > csv_count
+        available.append({
+            "name": name,
+            "label": "CICIDS2017" if name == "cicids2017" else "CICIoT2023",
+            "csv_count": csv_count,
+            "size_bytes": total_bytes,
+            "size_human": f"{total_bytes / (1024**2):.1f} MB" if total_bytes else "0 MB",
+            "downloaded": csv_count > 0,
+            "has_invalid_files": has_invalid,
+        })
+    return available
+
+@app.get("/api/datasets/{name}/stats")
+@limiter.limit("10/minute")
+async def get_dataset_stats(request: Request, name: str):
+    if name not in ("cicids2017", "ciciot2023"):
+        raise HTTPException(status_code=400, detail="Unknown dataset")
+    ds_dir = DATASETS_DIR / name
+    if not ds_dir.exists():
+        return {"downloaded": False, "name": name}
+    valid_count, _ = _count_valid_csvs(ds_dir)
+    if valid_count == 0:
+        return {"downloaded": False, "name": name}
+    try:
+        from ai_engine.dataset import load_cicids2017, load_ciciot2023
+        if name == "cicids2017":
+            df = load_cicids2017(str(ds_dir))
+        else:
+            df = load_ciciot2023(str(ds_dir))
+        total = len(df)
+        n_attack = int(df["is_attack"].sum()) if "is_attack" in df.columns else 0
+        # Attack type breakdown
+        attack_types = {}
+        if "label" in df.columns:
+            counts = df["label"].value_counts()
+            attack_types = {k: int(v) for k, v in counts.items()}
+        return {
+            "downloaded": True,
+            "name": name,
+            "total_samples": total,
+            "attack_samples": n_attack,
+            "benign_samples": total - n_attack,
+            "features": list(df.columns),
+            "attack_types": attack_types,
+        }
+    except Exception as e:
+        return {"downloaded": True, "name": name, "error": str(e)}
+
 @app.get("/api/jobs/{job_id}/metrics")
-async def get_job_metrics(job_id: str):
+@limiter.limit("30/minute")
+async def get_job_metrics(request: Request, job_id: str):
     job = get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -272,7 +521,8 @@ async def get_job_metrics(job_id: str):
 RULES_PATH = Path("signatures/rules.yaml")
 
 @app.get("/api/signatures")
-async def get_signatures():
+@limiter.limit("30/minute")
+async def get_signatures(request: Request):
     rules = load_rules(str(RULES_PATH))
     # Convert rules to dict
     return [
@@ -290,7 +540,8 @@ class SignatureToggle(BaseModel):
     enabled: bool
 
 @app.post("/api/signatures/{rule_id}/toggle")
-async def toggle_signature(rule_id: str, req: SignatureToggle):
+@limiter.limit("20/minute")
+async def toggle_signature(request: Request, rule_id: str, req: SignatureToggle):
     # Safe load and update
     with open(RULES_PATH) as f:
         data = yaml.safe_load(f)
@@ -310,21 +561,87 @@ async def toggle_signature(rule_id: str, req: SignatureToggle):
         
     return {"status": "success", "rule_id": rule_id, "enabled": req.enabled}
 
+class SignatureUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    severity: str | None = None
+    tags: list[str] | None = None
+    enabled: bool | None = None
+
+@app.put("/api/signatures/{rule_id}")
+@limiter.limit("20/minute")
+async def update_signature(request: Request, rule_id: str, req: SignatureUpdate):
+    with open(RULES_PATH) as f:
+        data = yaml.safe_load(f)
+
+    idx = -1
+    for i, r in enumerate(data.get("rules", [])):
+        if r.get("id") == rule_id:
+            idx = i
+            break
+
+    if idx == -1:
+        raise HTTPException(status_code=404, detail="Rule not found")
+
+    rule = data["rules"][idx]
+    if req.name is not None:
+        rule["name"] = req.name
+    if req.description is not None:
+        rule["description"] = req.description
+    if req.severity is not None:
+        if req.severity not in ("high", "medium", "low"):
+            raise HTTPException(status_code=400, detail="Severity must be high, medium, or low")
+        rule["severity"] = req.severity
+    if req.tags is not None:
+        rule["tags"] = req.tags
+    if req.enabled is not None:
+        rule["enabled"] = req.enabled
+
+    with open(RULES_PATH, "w") as f:
+        yaml.dump(data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+    return {"status": "success", "rule_id": rule_id, "rule": rule}
+
 # -----------------
 # System Monitor Control
 # -----------------
 
 @app.post("/api/system/monitor/restart")
-async def restart_monitor():
+@limiter.limit("1/minute")
+async def restart_monitor(request: Request):
     try:
-        # NOTE: This assumes the user running FastAPI has sudoers NOPASSWD for this service,
-        # or the API is running as root. If it fails, it will return 500.
         subprocess.run(["sudo", "systemctl", "restart", "ai-nids-monitor.service"], check=True)
         return {"status": "success"}
     except subprocess.CalledProcessError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to restart monitor: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to restart monitor: {e}. Ensure the API user has NOPASSWD sudo for systemctl restart ai-nids-monitor.service"
+        )
     except FileNotFoundError:
-        raise HTTPException(status_code=500, detail="systemctl command not found")
+        raise HTTPException(status_code=500, detail="systemctl command not found — is systemd installed?")
+
+# -----------------
+# System Logs
+# -----------------
+
+LOG_FILE = Path("data/nids.log")
+
+@app.get("/api/system/logs")
+@limiter.limit("30/minute")
+async def get_logs(request: Request, lines: int = 100):
+    """Return the last N lines of the system log file."""
+    if not LOG_FILE.exists():
+        return {"lines": [], "total": 0}
+    try:
+        with open(LOG_FILE, "r", errors="replace") as f:
+            all_lines = f.readlines()
+        tail = all_lines[-lines:] if len(all_lines) > lines else all_lines
+        return {
+            "lines": [l.rstrip("\n") for l in tail],
+            "total": len(all_lines),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read logs: {e}")
 
 # Serve the Next.js static export ONLY if it exists (for production)
 out_dir = Path("frontend/out")

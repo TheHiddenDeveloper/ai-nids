@@ -1,0 +1,226 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import {
+  Database,
+  HardDrive,
+  CheckCircle2,
+  AlertTriangle,
+  ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  Shield,
+} from "lucide-react";
+import type { DatasetInfo, DatasetStats } from "../lib/types";
+import { apiUrl } from "../lib/api";
+
+interface Props {
+  selected: string[];
+  onChange: (datasets: string[]) => void;
+  disabled?: boolean;
+}
+
+export function DatasetSelector({ selected, onChange, disabled }: Props) {
+  const [datasets, setDatasets] = useState<DatasetInfo[]>([]);
+  const [stats, setStats] = useState<Record<string, DatasetStats>>({});
+  const [loadingStats, setLoadingStats] = useState<string | null>(null);
+  const [expandedAttacks, setExpandedAttacks] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(apiUrl("/api/datasets"))
+      .then((r) => r.json())
+      .then((data) => setDatasets(data))
+      .catch(() => {});
+  }, []);
+
+  const loadStats = async (name: string) => {
+    if (stats[name]) return;
+    setLoadingStats(name);
+    try {
+      const res = await fetch(apiUrl(`/api/datasets/${name}/stats`));
+      const data = await res.json();
+      setStats((prev) => ({ ...prev, [name]: data }));
+    } catch {
+      setStats((prev) => ({
+        ...prev,
+        [name]: { downloaded: false, name, error: "Failed to load stats" },
+      }));
+    } finally {
+      setLoadingStats(null);
+    }
+  };
+
+  const toggle = (name: string) => {
+    if (disabled) return;
+    const ds = datasets.find((d) => d.name === name);
+    if (ds && !ds.downloaded) return;
+    const next = selected.includes(name)
+      ? selected.filter((d) => d !== name)
+      : [...selected, name];
+    onChange(next.length > 0 ? next : [name]);
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex justify-between items-center">
+        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
+          Training Datasets
+        </label>
+        <span className="text-[10px] text-slate-600">
+          {selected.length} selected
+        </span>
+      </div>
+      <div className="space-y-2">
+        {datasets.map((ds) => {
+          const isActive = selected.includes(ds.name);
+          const dsStats = stats[ds.name];
+          const isAvailable = ds.downloaded && !ds.has_invalid_files;
+          return (
+            <div key={ds.name}>
+              <button
+                type="button"
+                onClick={() => {
+                  toggle(ds.name);
+                  loadStats(ds.name);
+                }}
+                disabled={disabled || !isAvailable}
+                className={`w-full text-left px-3 py-2.5 rounded-xl border transition-all duration-150 ${
+                  isActive && isAvailable
+                    ? "bg-emerald-500/[0.06] border-emerald-500/30"
+                    : "bg-slate-950 border-white/5 hover:border-white/10"
+                } ${disabled || !isAvailable ? "opacity-55" : "cursor-pointer"}`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={`w-3.5 h-3.5 rounded border-2 flex items-center justify-center transition ${
+                        isActive && isAvailable
+                          ? "bg-emerald-500 border-emerald-500"
+                          : "border-slate-600"
+                      }`}
+                    >
+                      {isActive && isAvailable && (
+                        <CheckCircle2 className="w-2.5 h-2.5 text-white" />
+                      )}
+                    </div>
+                    <Database
+                      className={`w-3.5 h-3.5 ${
+                        isActive && isAvailable ? "text-emerald-400" : "text-slate-500"
+                      }`}
+                    />
+                    <div>
+                      <span
+                        className={`text-xs font-bold ${
+                          isActive && isAvailable ? "text-white" : "text-slate-400"
+                        }`}
+                      >
+                        {ds.label}
+                      </span>
+                      <span className="text-[10px] text-slate-600 ml-2 font-mono">
+                        {ds.name}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {isAvailable ? (
+                      <span className="flex items-center gap-1 text-[9px] text-emerald-500/70">
+                        <HardDrive className="w-3 h-3" />
+                        {ds.size_human}
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-[9px] text-amber-500/70">
+                        <AlertTriangle className="w-3 h-3" />
+                        {ds.has_invalid_files ? "Invalid files" : "Not downloaded"}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </button>
+              {dsStats && dsStats.downloaded && dsStats.total_samples && (
+                <div className="mt-1 px-3 flex gap-3 text-[9px] text-slate-500">
+                  <span>
+                    {dsStats.total_samples.toLocaleString()} samples
+                  </span>
+                  <span className="text-rose-400/60">
+                    {dsStats.attack_samples?.toLocaleString()} attack
+                  </span>
+                  <span className="text-emerald-400/60">
+                    {dsStats.benign_samples?.toLocaleString()} benign
+                  </span>
+                </div>
+              )}
+              {dsStats?.attack_types && Object.keys(dsStats.attack_types).length > 0 && (
+                <div className="mt-1.5">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setExpandedAttacks(expandedAttacks === ds.name ? null : ds.name);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1 text-[9px] text-slate-500 hover:text-slate-300 transition"
+                  >
+                    <Shield className="w-3 h-3" />
+                    {Object.keys(dsStats.attack_types).length} attack types
+                    {expandedAttacks === ds.name ? (
+                      <ChevronUp className="w-3 h-3" />
+                    ) : (
+                      <ChevronDown className="w-3 h-3" />
+                    )}
+                  </button>
+                  {expandedAttacks === ds.name && (
+                    <div className="mx-1 mt-1 bg-slate-950/50 border border-white/5 rounded-lg p-2 max-h-40 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-800">
+                      {Object.entries(dsStats.attack_types)
+                        .sort(([, a], [, b]) => b - a)
+                        .map(([label, count]) => (
+                          <div key={label} className="flex justify-between items-center py-0.5 text-[9px]">
+                            <span className={`font-mono ${label.toLowerCase().includes("benign") ? "text-emerald-400/70" : "text-slate-400"}`}>
+                              {label}
+                            </span>
+                            <span className="text-slate-600 font-mono">
+                              {count.toLocaleString()}
+                            </span>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              {!isAvailable && isActive && (
+                <div className="mt-1.5 mx-1 p-2.5 bg-amber-500/[0.06] border border-amber-500/20 rounded-lg text-[10px] text-amber-400/80 space-y-1">
+                  <div className="font-bold text-amber-400">
+                    {ds.has_invalid_files
+                      ? "Downloaded files are not valid CSVs (HTML pages from server)."
+                      : "Dataset not yet downloaded."}
+                  </div>
+                  <div className="text-amber-400/60 space-y-0.5">
+                    <div className="font-bold text-amber-400/80">Quick start (Kaggle):</div>
+                    <code className="block bg-slate-950/50 px-2 py-1 rounded text-[9px] font-mono">
+                      pip install kaggle && kaggle datasets download -d himadri07/ciciot2023 --unzip -p data/raw/ciciot2023
+                    </code>
+                    <div className="mt-1">
+                      Or download manually from{" "}
+                      <a
+                        href="https://www.kaggle.com/datasets/himadri07/ciciot2023"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline inline-flex items-center gap-0.5 hover:text-amber-300"
+                      >
+                        Kaggle <ExternalLink className="w-2.5 h-2.5" />
+                      </a>{" "}
+                      and extract CSVs into{" "}
+                      <code className="font-mono">data/raw/{ds.name}/</code>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-[10px] text-slate-600 leading-normal">
+        Combining multiple datasets diversifies the training corpus for improved
+        generalisation.
+      </p>
+    </div>
+  );
+}

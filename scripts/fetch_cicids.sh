@@ -1,10 +1,20 @@
 #!/bin/bash
-# scripts/fetch_cicids.sh
-# Downloads actual CICIDS2017 research data for high-precision training.
+# ==============================================================================
+# fetch_cicids.sh — CICIDS2017 Research Data Downloader (Shell Alternative)
+# ==============================================================================
+# Downloads the CICIDS2017 dataset from Hugging Face Hub for high-precision
+# model training. Alternative to the Python-based scripts/fetch_cicids.py.
+#
+# Files: Monday through Friday CSVs covering normal traffic + attacks.
+# Source: c01dsnap/CIC-IDS2017 on Hugging Face Hub
+#
+# Usage:
+#   bash scripts/fetch_cicids.sh
+# ==============================================================================
 
 set -e
 
-PROJECT_ROOT="/home/thehiddendeveloper/Dev Work/ai-nids"
+PROJECT_ROOT="/home/thehiddendeveloper/Dev/ai-nids"
 DATA_DIR="$PROJECT_ROOT/data/raw/cicids2017"
 mkdir -p "$DATA_DIR"
 

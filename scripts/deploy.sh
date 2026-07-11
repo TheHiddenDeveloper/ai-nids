@@ -1,7 +1,32 @@
 #!/usr/bin/env bash
-# Deploy AI-NIDS Systemd Services Dynamically
-# This script intelligently finds the project root, current user, and virtualenv
-# to set up systemd services correctly regardless of deployment path.
+# ==============================================================================
+# DEPLOY — Systemd Service Installer
+# ==============================================================================
+# Purpose:
+#   Installs AI-NIDS as systemd services for production deployment. Dynamically
+#   detects the project root, current user, virtualenv, and network interface
+#   to set up services correctly regardless of deployment path.
+#
+# Services:
+#   ai-nids-monitor.service — continuous packet capture + inference pipeline
+#   ai-nids-api.service     — FastAPI backend serving the dashboard + REST API
+#
+# Steps:
+#   1. Detect project root, user, virtualenv, node/npm
+#   2. Build Next.js frontend (static export for FastAPI to serve)
+#   3. Detect active network interface (excludes lo/docker/bridge)
+#   4. Process systemd service templates (replace {{variables}})
+#   5. Copy to /etc/systemd/system/, daemon-reload, enable, restart
+#
+# Usage:
+#   sudo bash scripts/deploy.sh
+#
+# Design:
+#   - No separate dashboard service — FastAPI serves frontend at / on port 8000
+#   - ai-nids-dashboard.service was removed as redundant
+#   - Uses sed for template variable substitution
+#   - After deploy, check: sudo systemctl status ai-nids-monitor.service
+# ==============================================================================
 
 set -e
 
@@ -17,7 +42,9 @@ if [ ! -d "$PROJECT_ROOT/scripts/systemd" ]; then
 fi
 
 echo "Project Root: $PROJECT_ROOT"
-echo "Current User: $USER"
+# When run with sudo, $USER is "root" — use $SUDO_USER for the real user
+REAL_USER="${SUDO_USER:-$USER}"
+echo "Current User: $REAL_USER"
 
 # 2. Check for virtual environment
 VENV_DIR="$PROJECT_ROOT/ai-venv"
@@ -43,7 +70,7 @@ fi
 echo "Node.js version: $(node --version)"
 echo "npm version: $(npm --version)"
 
-# 2c. Build the Next.js frontend
+# 2c. Build the Next.js frontend (static export served by FastAPI on port 8000)
 echo ""
 echo "Building Next.js frontend..."
 cd "$PROJECT_ROOT/frontend"
@@ -75,10 +102,9 @@ else
   echo "Detected Interface: $INTERFACE"
 fi
 
-# 4. Define target service files
+# 4. Define target service files (frontend is served by FastAPI at port 8000, no separate dashboard service)
 MONITOR_SVC="ai-nids-monitor.service"
 API_SVC="ai-nids-api.service"
-DASHBOARD_SVC="ai-nids-dashboard.service"
 
 # 5. Process and copy service files
 echo "Processing and copying service files to /etc/systemd/system/..."
@@ -93,7 +119,7 @@ process_service() {
   
   # Perform replacements while preserving absolute paths and handling spaces via {{PROJECT_ROOT}}
   sed "s|{{PROJECT_ROOT}}|$PROJECT_ROOT|g" "$src" | \
-  sed "s|{{USER}}|$USER|g" | \
+  sed "s|{{USER}}|$REAL_USER|g" | \
   sed "s|{{INTERFACE}}|$INTERFACE|g" > "$tmp_file"
   
   # Copy to final destination with sudo
@@ -103,7 +129,6 @@ process_service() {
 
 process_service "$MONITOR_SVC"
 process_service "$API_SVC"
-process_service "$DASHBOARD_SVC"
 
 # 6. Reload and restart
 echo "Reloading systemd daemon..."
@@ -112,16 +137,15 @@ sudo systemctl daemon-reload
 echo "Enabling services..."
 sudo systemctl enable "$MONITOR_SVC"
 sudo systemctl enable "$API_SVC"
-sudo systemctl enable "$DASHBOARD_SVC"
 
 echo "Restarting services..."
 sudo systemctl restart "$MONITOR_SVC"
 sudo systemctl restart "$API_SVC"
-sudo systemctl restart "$DASHBOARD_SVC"
 
 echo "✅ Deployment Complete!"
 echo ""
 echo "Check status:"
 echo "  sudo systemctl status $MONITOR_SVC"
 echo "  sudo systemctl status $API_SVC"
-echo "  sudo systemctl status $DASHBOARD_SVC"
+echo ""
+echo "Frontend is served by the API at http://localhost:8000 (no separate dashboard service needed)"

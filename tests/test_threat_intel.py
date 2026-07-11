@@ -1,3 +1,26 @@
+"""
+================================================================================
+TEST: THREAT INTEL — GeoIP + Reputation Feeds
+================================================================================
+Purpose:
+  Tests ThreatIntelManager GeoIP enrichment (via ip-api.com, requires internet)
+  and community feed sync (Emerging Threats, Feodo Tracker).
+
+Run:
+  python tests/test_threat_intel.py    # standalone (skips if Redis unavailable)
+
+DEPENDENCIES:
+  - Redis must be running
+  - Internet access for GeoIP API and feed downloads
+  - Calls flushdb() which wipes Redis DB 0
+
+Testing:
+  - Private IPs return empty enrichment (192.168.*, 10.*, 127.0.0.1)
+  - Public IPs should return country, city, ISP data
+  - Feed sync populates the blocklist set in Redis
+================================================================================
+"""
+
 import sys
 import time
 import os

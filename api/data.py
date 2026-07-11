@@ -1,8 +1,25 @@
 """
-FastAPI Data Utilities
-----------------------
-Handles DB connections, Redis interactions, and payload structuring
-for the REST API.
+================================================================================
+API DATA UTILITIES — DB + Redis Queries for REST Endpoints
+================================================================================
+Purpose:
+  Helper functions used by api/main.py endpoints to query SQLite and Redis
+  for alerts, flows, incidents, comparison stats, and firewall commands.
+
+Functions:
+  load_from_db(table, limit, offset)  — H3: fetch paginated records
+  count_rows(table)                   — H3: total count for pagination header
+  load_incidents(limit)               — fetch incident mapping from SQLite
+  get_comparison_stats()              — current_24h vs prev_24h metrics
+  send_firewall_command(action, ip)   — Redis pub/sub to FirewallEngine
+
+Design:
+  - SQLite reads are direct (no ORM), with raw_json column for JSON deserialization
+  - get_comparison_stats(): H2 — queries structured columns (severity) for
+    high/medium count, not raw_json parsing
+  - send_firewall_command() publishes to "nids:commands" Redis channel
+  - All functions handle missing DB gracefully (return empty lists/None)
+================================================================================
 """
 import sys
 from pathlib import Path
@@ -16,32 +33,40 @@ from core.redis_client import get_redis_client
 
 DB_PATH = Path("data/nids.db")
 
-def load_from_db(table: str, limit: int = 2000) -> list:
-    """Fetch recent records from SQLite natively, returning parsed JSON list."""
+def load_from_db(table: str, limit: int = 2000, offset: int = 0) -> list:
+    """H3: fetch records from SQLite with offset/limit pagination."""
     if not DB_PATH.exists():
         return []
     try:
         conn = sqlite3.connect(DB_PATH)
         cur = conn.cursor()
-        cur.execute(f"SELECT raw_json FROM {table} ORDER BY timestamp DESC LIMIT ?", (limit,))
+        cur.execute(
+            f"SELECT raw_json FROM {table} ORDER BY timestamp DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        )
         rows = cur.fetchall()
         conn.close()
-        
         if not rows:
             return []
-            
-        # Parse JSON and clean non-compliant Pandas Infinity/NaN outputs
-        records = []
-        for row in reversed(rows):
-            clean_json = row[0].replace('NaN', 'null').replace('Infinity', 'null').replace('-Infinity', 'null')
-            try:
-                records.append(json.loads(clean_json))
-            except json.JSONDecodeError:
-                pass
+        records = [json.loads(r[0]) for r in reversed(rows)]
         return records
     except Exception as e:
         logger.error(f"Error loading {table}: {e}")
         return []
+
+def count_rows(table: str) -> int:
+    """H3: return total row count for pagination header."""
+    if not DB_PATH.exists():
+        return 0
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute(f"SELECT count(*) FROM {table}")
+        row = cur.fetchone()
+        conn.close()
+        return row[0] if row else 0
+    except Exception:
+        return 0
 
 def load_incidents(limit: int = 100) -> list:
     """Fetch incidents mapping."""
@@ -83,10 +108,10 @@ def get_comparison_stats() -> dict:
         cur.execute("SELECT count(*) FROM alerts WHERE timestamp >= ? AND timestamp < ?", (p24, c24))
         prev_alerts = cur.fetchone()[0]
         
-        # Critical alerts (High/Medium)
-        cur.execute("SELECT count(*) FROM alerts WHERE timestamp >= ? AND (raw_json LIKE '%\"severity\": \"high\"%' OR raw_json LIKE '%\"severity\": \"medium\"%')", (c24,))
+        # Critical alerts (High/Medium) — query structured column (H2)
+        cur.execute("SELECT count(*) FROM alerts WHERE timestamp >= ? AND severity IN ('high', 'medium')", (c24,))
         cur_high = cur.fetchone()[0]
-        cur.execute("SELECT count(*) FROM alerts WHERE timestamp >= ? AND timestamp < ? AND (raw_json LIKE '%\"severity\": \"high\"%' OR raw_json LIKE '%\"severity\": \"medium\"%')", (p24, c24))
+        cur.execute("SELECT count(*) FROM alerts WHERE timestamp >= ? AND timestamp < ? AND severity IN ('high', 'medium')", (p24, c24))
         prev_high = cur.fetchone()[0]
         
         conn.close()

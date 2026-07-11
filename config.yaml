@@ -1,12 +1,19 @@
+# ==============================================================================
+# AI-NIDS Configuration
+# ==============================================================================
+# Central configuration file (no .env). All runtime settings are here.
+# Changes take effect on restart unless noted otherwise.
+# ==============================================================================
+
 network:
-  interface: "eth0"           # change to your NIC (ip a to check)
-  home_net: ["192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"]
+  interface: "auto"           # "auto" = detect active NIC; or specify name like "eth0"
+  home_net: ["auto"]          # "auto" = derive /32 from interface IP; or explicit list
   capture_timeout: 10         # seconds per capture window
   max_packets: 1000           # packets per batch
 
 features:
   flow_timeout: 60            # seconds before a flow expires
-  selected_features:          # must match FEATURE_COLS in dataset.py / feature_extractor.py
+  selected_features:          # canonical source is core/features.py
     - dst_port
     - duration
     - src_bytes
@@ -18,21 +25,43 @@ features:
     - flow_packets_per_sec
     - fwd_packet_len_max
     - bwd_packet_len_max
+    - flow_iat_mean
+    - flow_iat_std
+    - flow_iat_max
+    - flow_iat_min
     - fin_flag_count
     - syn_flag_count
     - rst_flag_count
     - psh_flag_count
     - ack_flag_count
+    - syn_ratio
+    - fin_ratio
+    - rst_ratio
+    - ack_ratio
+    - psh_ratio
+    - port_is_web
+    - port_is_mail
+    - port_is_admin
+    - port_is_db
+    - port_is_dns
 
+# ------------------------------------------------------------------------------
+# Model (ML Ensemble)
+# ------------------------------------------------------------------------------
 model:
-  type: "random_forest"       # random_forest | autoencoder | ensemble
+  type: "ensemble"            # random_forest | autoencoder | ensemble
   rf_n_estimators: 200
   rf_max_depth: 20
-  anomaly_threshold: 0.65     # score above this = alert
+  rf_weight: 0.65
+  ae_weight: 0.35
+  anomaly_threshold: 0.5      # score above this = label ATTACK
   model_path: "data/models/nids_model.joblib"
   scaler_path: "data/models/scaler.joblib"
   label_encoder_path: "data/models/label_encoder.joblib"
 
+# ------------------------------------------------------------------------------
+# Alerts
+# ------------------------------------------------------------------------------
 alerts:
   severity_levels:
     low: 0.65
@@ -40,16 +69,45 @@ alerts:
     high: 0.92
   log_path: "data/alerts.jsonl"
 
+# ------------------------------------------------------------------------------
+# API (FastAPI Backend)
+# ------------------------------------------------------------------------------
+api:
+  key: ""                  # set to an API key string to enable auth on all /api/ endpoints
+
+# ------------------------------------------------------------------------------
+# Dashboard (Next.js Frontend)
+# ------------------------------------------------------------------------------
 dashboard:
   api_host: "0.0.0.0"
   api_port: 8000
   frontend_port: 3000
   refresh_interval: 3         # seconds
 
+# ------------------------------------------------------------------------------
+# Threat Intelligence
+# ------------------------------------------------------------------------------
+threat_intel:
+  feeds:
+    emerging_threats: "https://rules.emergingthreats.net/fwrules/emerging-Block-IPs.txt"
+    feodo_tracker: "https://feodotracker.abuse.ch/downloads/ipblocklist.txt"
+
+# ------------------------------------------------------------------------------
+# Data Retention
+# ------------------------------------------------------------------------------
+retention:
+  days: 30                # O1: delete flows/alerts older than this (0 = keep forever)
+
+# ------------------------------------------------------------------------------
+# Logging
+# ------------------------------------------------------------------------------
 logging:
   level: "INFO"
   log_file: "data/nids.log"
 
+# ------------------------------------------------------------------------------
+# Redis (Optional — set active: false for in-memory fallback)
+# ------------------------------------------------------------------------------
 redis:
   host: "localhost"
   port: 6379

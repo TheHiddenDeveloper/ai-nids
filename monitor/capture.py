@@ -1,8 +1,31 @@
 """
-Packet Capture Module
----------------------
-Captures raw packets from a network interface using scapy.
-Emits packet dictionaries for downstream processing.
+================================================================================
+PACKET CAPTURE — Live + Pcap Replay
+================================================================================
+Purpose:
+  Captures raw packets from a network interface using scapy (live mode) or
+  replays packets from a .pcap file. Emits packet dictionaries with extracted
+  fields for downstream processing in the pipeline.
+
+Usage:
+  # Live capture
+  cap = PacketCapture(interface="eth0")
+  cap.start(callback=my_packet_handler)  # blocks until timeout
+
+  # PCAP replay
+  replay = PcapReplay("data/raw/sample.pcap")
+  replay.play(callback=my_packet_handler)
+
+Packet dict structure:
+  {timestamp, src_ip, dst_ip, protocol, ip_len, ttl,
+   src_port, dst_port, tcp_flags, fin, syn, rst, psh, ack, urg}
+
+Supported: IPv4, IPv6, TCP, UDP, ICMP
+  - TCP: extracts all 6 flag bits (fin, syn, rst, psh, ack, urg)
+  - UDP: extracts src/dst ports only
+  - ICMP: protocol set to 1, src_port=icmp.type, dst_port=icmp.code
+  - Non-IP/IPv6 frames are silently dropped
+================================================================================
 """
 
 import time
@@ -10,7 +33,7 @@ from typing import Callable, Optional
 from loguru import logger
 
 try:
-    from scapy.all import sniff, IP, TCP, UDP, ICMP
+    from scapy.all import sniff, IP, IPv6, TCP, UDP, ICMP
     SCAPY_AVAILABLE = True
 except ImportError:
     SCAPY_AVAILABLE = False
@@ -26,30 +49,44 @@ class PacketCapture:
         cap.start(callback=my_handler)
     """
 
-    def __init__(self, interface: str = "eth0", timeout: int = 10, max_packets: int = 1000):
+    def __init__(self, interface: str = "eth0", timeout: Optional[int] = None, max_packets: int = 1000):
         self.interface = interface
         self.timeout = timeout
         self.max_packets = max_packets
         self._running = False
 
     def _parse_packet(self, pkt) -> Optional[dict]:
-        """Extract relevant fields from a raw scapy packet."""
-        if not pkt.haslayer(IP):
+        """Extract relevant fields from a raw scapy packet (IPv4, IPv6, TCP, UDP, ICMP)."""
+        if pkt.haslayer(IP):
+            ip = pkt[IP]
+            record = {
+                "timestamp": time.time(),
+                "src_ip": ip.src,
+                "dst_ip": ip.dst,
+                "protocol": ip.proto,
+                "ip_len": ip.len,
+                "ttl": ip.ttl,
+                "src_port": None,
+                "dst_port": None,
+                "tcp_flags": None,
+                "fin": 0, "syn": 0, "rst": 0, "psh": 0, "ack": 0, "urg": 0,
+            }
+        elif pkt.haslayer(IPv6):
+            ipv6 = pkt[IPv6]
+            record = {
+                "timestamp": time.time(),
+                "src_ip": ipv6.src,
+                "dst_ip": ipv6.dst,
+                "protocol": ipv6.nh,
+                "ip_len": ipv6.plen,
+                "ttl": ipv6.hlim,
+                "src_port": None,
+                "dst_port": None,
+                "tcp_flags": None,
+                "fin": 0, "syn": 0, "rst": 0, "psh": 0, "ack": 0, "urg": 0,
+            }
+        else:
             return None
-
-        ip = pkt[IP]
-        record = {
-            "timestamp": time.time(),
-            "src_ip": ip.src,
-            "dst_ip": ip.dst,
-            "protocol": ip.proto,
-            "ip_len": ip.len,
-            "ttl": ip.ttl,
-            "src_port": None,
-            "dst_port": None,
-            "tcp_flags": None,
-            "fin": 0, "syn": 0, "rst": 0, "psh": 0, "ack": 0, "urg": 0,
-        }
 
         if pkt.haslayer(TCP):
             tcp = pkt[TCP]
@@ -69,12 +106,18 @@ class PacketCapture:
             record["src_port"] = udp.sport
             record["dst_port"] = udp.dport
 
+        elif pkt.haslayer(ICMP):
+            icmp = pkt[ICMP]
+            record["protocol"] = 1
+            record["src_port"] = icmp.type
+            record["dst_port"] = icmp.code
+
         return record
 
     def start(self, callback: Callable[[dict], None]) -> None:
         """
         Start sniffing. Calls callback(packet_dict) for every parsed packet.
-        Runs until max_packets captured or timeout reached.
+        Runs until timeout is reached (count=0 means no packet cap within window).
         """
         if not SCAPY_AVAILABLE:
             raise RuntimeError("scapy is required for packet capture.")
@@ -92,7 +135,7 @@ class PacketCapture:
             iface=self.interface,
             prn=_handler,
             timeout=self.timeout,
-            count=self.max_packets,
+            count=0,               # 0 = infinite capture within timeout window
             store=False,
         )
         self._running = False

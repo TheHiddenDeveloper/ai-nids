@@ -1,4 +1,26 @@
 #!/usr/bin/env python3
+"""
+================================================================================
+CAPTURE DATASET — Labeled Flow Capture to CSV
+================================================================================
+Purpose:
+  Captures live traffic (or replays a pcap) and saves aggregated flow features
+  to a labeled CSV file. Useful for building custom labeled datasets for
+  training or evaluation.
+
+Usage:
+  python scripts/capture_dataset.py --label BENIGN --out data/raw/benign.csv --interface eth0
+  python scripts/capture_dataset.py --label ATTACK_DOS --pcap dos_attack.pcap --out data/raw/dos.csv
+
+Design:
+  - Runs capture for a specified timeout (or until pcap ends)
+  - Aggregates packets into bidirectional flows via FlowAggregator
+  - Extracts features via FeatureExtractor
+  - Saves all flow features + label to CSV
+  - Can be used to augment CICIDS2017 data with custom captures
+================================================================================
+"""
+
 import sys
 import time
 import argparse

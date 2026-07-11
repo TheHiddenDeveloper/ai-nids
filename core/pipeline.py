@@ -1,17 +1,44 @@
 """
-Pipeline Orchestrator
----------------------
-Central Step 4 component. Wires together:
-  capture → flow aggregation → feature extraction →
-  inference → deduplication → alert engine →
-  event bus (→ loggers, stats, dashboard)
+================================================================================
+PIPELINE ORCHESTRATOR — Central Controller
+================================================================================
+Purpose:
+  The main loop that wires together the full detection chain:
+    capture → flow aggregation → feature extraction → ensemble inference →
+    deduplication → alert engine → event bus (→ loggers, stats, dashboard)
 
-Run this in a background thread or directly from run_monitor.py.
+Usage:
+  pipeline = NIDSPipeline(model_dir="data/models", ...)
+  pipeline.start()
+  pipeline.ingest_packet(pkt)   # called by capture thread for each packet
+  pipeline.stop()
+
+Architecture:
+  - Owns: FlowAggregator, FeatureExtractor, EnsembleInferenceEngine (or None),
+    SignatureChecker, AlertDeduplicator, IncidentCorrelator, ThreatIntelManager,
+    EventBus, StatsTracker
+  - ingest_packet() is the single entry point, called from capture thread
+  - Background maintenance thread evicts stale flows and dedup keys every 10s
+  - Threat intel enrichment runs in a ThreadPoolExecutor (max 4 workers)
+  - Data retention cleanup runs every ~100 maintenance cycles (~17 min)
+
+Modes:
+  - Full ensemble: RF + Autoencoder + signatures (default)
+  - Signature-only: --no-model flag, uses SignatureChecker only
+  - AI-only: signature_checker=None
+
+Design notes:
+  - L4: drops packets if active_flow_count >= max_active_flows (backpressure)
+  - L1: batch stats recording in single lock acquisition
+  - O1: data retention via cleanup_old_data()
+  - Processed flows are published to the event bus for real-time dashboard
+================================================================================
 """
 
 import time
 import yaml
 import threading
+import concurrent.futures
 from pathlib import Path
 from typing import Optional
 from loguru import logger
@@ -23,10 +50,12 @@ from ai_engine.ensemble import EnsembleInferenceEngine
 from ai_engine.alert_engine import process_results
 from signatures.checker import SignatureChecker
 from core.event_bus import EventBus
+from core.network_auto import poll_network_change
 from core.deduplicator import AlertDeduplicator
 from core.stats_tracker import StatsTracker
 from core.correlator import IncidentCorrelator
 from core.threat_intel import ThreatIntelManager
+from monitor.db import cleanup_old_data
 
 
 class NIDSPipeline:
@@ -42,20 +71,25 @@ class NIDSPipeline:
 
     def __init__(
         self,
-        model_dir:      str = "data/models",
-        flow_log_path:  str = "data/flows.jsonl",
-        alert_log_path: str = "data/alerts.jsonl",
-        flow_timeout:   int = 20,
-        dedup_window:   int = 60,
-        use_signatures: bool = True,
-        use_model:      bool = True,
-        event_bus:      Optional[EventBus] = None,
-        stats_tracker:  Optional[StatsTracker] = None,
-        home_net:       Optional[list] = None
+        model_dir:       str = "data/models",
+        flow_log_path:   str = "data/flows.jsonl",
+        alert_log_path:  str = "data/alerts.jsonl",
+        flow_timeout:    int = 20,
+        dedup_window:    int = 60,
+        use_signatures:  bool = True,
+        use_model:       bool = True,
+        event_bus:       Optional[EventBus] = None,
+        stats_tracker:   Optional[StatsTracker] = None,
+        home_net:        Optional[list] = None,
+        max_active_flows: int = 50000,
+        retention_days:  int = 30,
     ):
         self.use_model      = use_model
         self.use_signatures = use_signatures
         self.home_net       = home_net or []
+        self.max_active_flows = max_active_flows  # L4
+        self._net_interface = None
+        self._net_config_snapshot = None
 
         # Core processing components
         self.aggregator  = FlowAggregator(flow_timeout=flow_timeout, home_net=self.home_net)
@@ -65,13 +99,11 @@ class NIDSPipeline:
         self.correlator  = IncidentCorrelator(inactivity_window=180) # 3-minute window
         self.intel       = ThreatIntelManager()
 
-        # AI inference (ensemble: RF + Autoencoder)
+        # AI inference (ensemble: RF + Autoencoder, weights from config.yaml)
         self.engine = None
         if use_model:
             self.engine = EnsembleInferenceEngine(
                 model_dir = model_dir,
-                rf_weight = 0.65,
-                ae_weight = 0.35,
             )
 
         # Loggers (now use SQLite via monitor.db)
@@ -82,7 +114,13 @@ class NIDSPipeline:
         self.bus   = event_bus   or EventBus()
         self.stats = stats_tracker or StatsTracker()
 
-        # Eviction maintenance — runs periodically in background
+        # Thread pool for async enrichment (max 4 concurrent lookups)
+        self._intel_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="nids-intel")
+
+        # O1: data retention (0 = keep forever)
+        self.retention_days = retention_days
+        self._cleanup_counter = 0
+
         self._stop_event   = threading.Event()
         self._maint_thread: Optional[threading.Thread] = None
 
@@ -114,6 +152,7 @@ class NIDSPipeline:
     def stop(self):
         """Flush remaining flows and shut down."""
         self._stop_event.set()
+        self._intel_pool.shutdown(wait=True)
         remaining = self.aggregator.flush_all()
         if remaining:
             self._process_flows(remaining)
@@ -126,11 +165,12 @@ class NIDSPipeline:
     def ingest_packet(self, pkt: dict) -> None:
         """
         Main entry point — called once per captured packet.
+        L4: drops packet if flow table exceeds max_active_flows (backpressure).
         """
+        if self.aggregator.active_flow_count >= self.max_active_flows:
+            return
         self.stats.record_packet()
-        completed_flows = self.aggregator.ingest(pkt)
-        if completed_flows:
-            self._process_flows(completed_flows)
+        self.aggregator.ingest(pkt)
 
     def _process_flows(self, flows: list) -> None:
         """Run feature extraction, inference and alerting on a batch of flows."""
@@ -138,12 +178,14 @@ class NIDSPipeline:
         if df is None:
             return
 
-        # Record flow stats
-        for flow in flows:
-            self.stats.record_flow(flow)
+        # L1: batch stats in a single lock acquisition
+        self.stats.record_flows_batch(flows)
 
         if self.engine:
             raw_results = self.engine.predict(df)
+            # Inject flow features so sig_checker can inspect syn_flag_count, direction, etc.
+            for result, flow in zip(raw_results, flows):
+                result.update({k: v for k, v in flow.items() if not k.startswith("_")})
         else:
             # Build minimal result dicts from raw flow dicts for sig-only path
             raw_results = []
@@ -161,45 +203,75 @@ class NIDSPipeline:
                 # Inject flow features so sig_checker can inspect them
                 raw_results[-1].update({k: v for k, v in flow.items() if not k.startswith("_")})
 
-        # Publish all scored flows
+        # Publish all scored flows and track scores for drift detection
         self.flow_logger.log_batch(raw_results)
         for r in raw_results:
+            self.stats.record_flow_score(
+                score=r.get("score", 0.0),
+                label=r.get("label", "BENIGN"),
+                src_ip=r.get("_src_ip"),
+            )
             self.bus.publish("flow", r)
 
         # Alert path
         alerts = process_results(raw_results, signature_checker=self.sig_checker)
+
+        # Filter out deduplicated alerts
+        active_alerts = []
         for alert in alerts:
             if not self.deduplicator.should_fire(alert):
                 continue
-
             note = self.deduplicator.suppression_note(alert)
             if note:
                 alert["suppression_note"] = note
+            active_alerts.append(alert)
 
-            # Threat Intel Enrichment
-            intel = self.intel.get_enrichment(alert.get("_src_ip"))
-            if intel:
-                alert.update({
-                    "country":      intel.get("country"),
-                    "city":         intel.get("city"),
-                    "asn":          intel.get("asn"),
-                    "threat_level": intel.get("threat_level"),
-                    "is_malicious": intel.get("is_malicious"),
-                    "isp":          intel.get("isp")
-                })
+        # Threat Intel Enrichment — parallel HTTP lookups off the hot path
+        if active_alerts:
+            futures = {}
+            for alert in active_alerts:
+                ip = alert.get("_src_ip")
+                fut = self._intel_pool.submit(self.intel.get_enrichment, ip)
+                futures[fut] = alert
 
-            alert["incident_id"] = self.correlator.process_alert(alert, intel=intel)
+            for fut in concurrent.futures.as_completed(futures):
+                alert = futures[fut]
+                try:
+                    intel = fut.result(timeout=10)
+                except Exception as e:
+                    logger.warning(f"ThreatIntel enrichment failed: {e}")
+                    intel = {}
 
-            self.alert_logger.log_alert(alert)
-            self.stats.record_alert(alert)
-            self.bus.publish("alert", alert)
+                if intel:
+                    alert.update({
+                        "country":      intel.get("country"),
+                        "city":         intel.get("city"),
+                        "asn":          intel.get("asn"),
+                        "threat_level": intel.get("threat_level"),
+                        "is_malicious": intel.get("is_malicious"),
+                        "isp":          intel.get("isp"),
+                        "_src_ip_lat":  intel.get("lat"),
+                        "_src_ip_lon":  intel.get("lon"),
+                    })
+
+                alert["incident_id"] = self.correlator.process_alert(alert, intel=intel)
+
+                self.alert_logger.log_alert(alert)
+                self.stats.record_alert(alert)
+                self.bus.publish("alert", alert)
 
         # Periodic stats snapshot
         self.bus.publish("stats", self.stats.snapshot())
 
     def _maintenance_loop(self):
-        """Background: evict stale dedup keys every 60s."""
-        while not self._stop_event.wait(timeout=60):
+        """Background: evict stale flows, dedup keys, incidents, old data."""
+        poll_counter = 0
+        while not self._stop_event.wait(timeout=10):
+            expired_flows = self.aggregator.flush_expired()
+            if expired_flows:
+                logger.debug(f"Maintenance: evicted {len(expired_flows)} expired flows")
+                self._process_flows(expired_flows)
+
             evicted = self.deduplicator.evict_expired()
             if evicted:
                 logger.debug(f"Maintenance: evicted {evicted} stale dedup keys")
@@ -211,6 +283,40 @@ class NIDSPipeline:
                 for cid in closed:
                     # Optional: publish 'incident_closed' event if needed
                     self.bus.publish("incident_update", {"id": cid, "status": "closed"})
+
+            closed = self.correlator.evict_stale()
+            if closed:
+                logger.info(f"Maintenance: closed {len(closed)} stale incidents")
+                for cid in closed:
+                    self.bus.publish("incident_update", {"id": cid, "status": "closed"})
+
+            # O1: periodic data retention cleanup (~every 100 iterations ≈ 17min)
+            self._cleanup_counter += 1
+            if self.retention_days > 0 and self._cleanup_counter % 100 == 0:
+                cleanup_old_data(retention_days=self.retention_days)
+
+            # Network change poll (~every 60s = 6 iterations at 10s interval)
+            poll_counter += 1
+            if poll_counter % 6 == 0 and self._net_config_snapshot and self._net_interface:
+                changed = poll_network_change(
+                    self._net_config_snapshot,
+                    self._net_interface,
+                    self.home_net,
+                )
+                if changed:
+                    logger.warning(
+                        f"Network change detected: IP {self._net_config_snapshot.get('ip')} "
+                        f"-> {changed.get('ip')}. Updating HOME_NET for new flows."
+                    )
+                    new_nets = changed["home_net"]
+                    self.aggregator.update_home_net(new_nets)
+                    self.home_net = new_nets
+                    self._net_config_snapshot = changed
+
+    def set_network_monitoring(self, interface: str, net_config: dict) -> None:
+        """Seed the network-change poller with interface + initial snapshot."""
+        self._net_interface = interface
+        self._net_config_snapshot = net_config
 
     @property
     def active_flows(self) -> int:

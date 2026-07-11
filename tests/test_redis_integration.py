@@ -1,3 +1,20 @@
+"""
+================================================================================
+TEST: REDIS INTEGRATION — Pub/Sub + Dedup Persistence
+================================================================================
+Purpose:
+  Tests Redis-backed EventBus pub/sub (cross-instance event broadcast) and
+  AlertDeduplicator persistence (Redis SET NX with TTL for alert suppression).
+
+Run:
+  python tests/test_redis_integration.py    # standalone (skips if Redis unavailable)
+
+DEPENDENCIES:
+  - Redis must be running
+  - Calls flushdb() which wipes Redis DB 0
+================================================================================
+"""
+
 import time
 import json
 import threading
@@ -7,7 +24,7 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.event_bus import bus
+from core.event_bus import EventBus
 from core.deduplicator import AlertDeduplicator
 
 def test_redis_pubsub():
@@ -17,6 +34,8 @@ def test_redis_pubsub():
     def on_alert(payload):
         print(f"  [Subscriber] Received alert: {payload['id']}")
         received.append(payload)
+
+    bus = EventBus()
 
     # Subscribe (this starts the Redis listener thread)
     bus.subscribe("alert", on_alert)
