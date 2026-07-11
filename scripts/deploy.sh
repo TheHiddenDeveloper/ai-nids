@@ -141,14 +141,20 @@ sudo systemctl enable "$API_SVC"
 echo "Restarting services..."
 sudo systemctl restart "$MONITOR_SVC"
 
-# Ensure data/ files are readable by the non-root API process
+# Ensure data/ files are readable/writable by the non-root API process
 # (monitor runs as root and creates root-owned SQLite files)
 sleep 2
 if [ -d "$PROJECT_ROOT/data" ]; then
-  sudo chmod -R a+rX "$PROJECT_ROOT/data"
-  sudo chmod a+w "$PROJECT_ROOT/data"
+  sudo chmod -R a+rwX "$PROJECT_ROOT/data"
   echo "✅ Data directory permissions updated for non-root API access"
 fi
+
+# 7. Configure passwordless sudo for the API to restart the monitor service
+SUDOERS_FILE="/etc/sudoers.d/ai-nids-api"
+SUDOERS_CONTENT="${REAL_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl restart ai-nids-monitor.service, /usr/bin/systemctl start ai-nids-monitor.service, /usr/bin/systemctl stop ai-nids-monitor.service"
+echo "$SUDOERS_CONTENT" | sudo tee "$SUDOERS_FILE" > /dev/null
+sudo chmod 440 "$SUDOERS_FILE"
+echo "✅ Sudoers entry added for $REAL_USER (systemctl restart/start/stop ai-nids-monitor)"
 
 sudo systemctl restart "$API_SVC"
 

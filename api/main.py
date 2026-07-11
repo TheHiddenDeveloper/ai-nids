@@ -226,13 +226,40 @@ async def firewall_action(request: Request, action: FirewallAction):
 async def wipe_database(request: Request):
     try:
         success = clear_db_data()
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to wipe database. The database files may be owned by another user (e.g. root). Run: sudo chmod -R a+rw data/")
+        if success:
+            return {"status": "success"}
+    except Exception:
+        pass
+
+    # Fallback: DB files may be root-owned. Delete them (directory is writable)
+    # and truncate log files. Monitor will recreate the DB on next startup.
+    try:
+        from pathlib import Path
+        db = Path("data/nids.db")
+        for suffix in ["", "-wal", "-shm"]:
+            f = db.with_suffix(db.suffix + suffix)
+            if f.exists():
+                f.unlink()
+        for log in ["data/flows.jsonl", "data/alerts.jsonl", "data/nids.log"]:
+            p = Path(log)
+            if p.exists():
+                try:
+                    p.write_text("")
+                except PermissionError:
+                    p.unlink()  # directory is writable, unlink works
+        # Re-init the schema so the API can use the DB immediately
+        from monitor.db import init_db, _db_init_lock
+        import monitor.db as _mdb
+        with _db_init_lock:
+            _mdb._db_initialized = False
+            init_db()
+            _mdb._db_initialized = True
         return {"status": "success"}
-    except HTTPException:
-        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to wipe database: {e}. Try: sudo chmod -R a+rw data/")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to wipe database: {e}. Run 'sudo bash scripts/deploy.sh' to fix permissions."
+        )
 
 # -----------------
 # Jobs & Background Tasks
@@ -623,7 +650,7 @@ async def restart_monitor(request: Request):
     except subprocess.CalledProcessError as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to restart monitor: {e}. Ensure sudo is configured for systemctl."
+            detail=f"Failed to restart monitor: {e}. Run 'sudo bash scripts/deploy.sh' to configure permissions for your user."
         )
     except FileNotFoundError:
         raise HTTPException(status_code=500, detail="systemctl or sudo not found. Is systemd installed?")
