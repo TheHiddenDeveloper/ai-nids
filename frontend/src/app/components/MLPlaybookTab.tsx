@@ -32,7 +32,7 @@ import {
   Legend
 } from "recharts";
 
-import type { Job, JobMetrics, ModelVersion, DeploymentStatus } from "../lib/types";
+import type { Job, JobMetrics, ModelVersion } from "../lib/types";
 import { apiUrl, fetcher } from "../lib/api";
 import { TrainingReportPanel } from "./TrainingReportPanel";
 import { DatasetSelector } from "./DatasetSelector";
@@ -48,8 +48,6 @@ export function MLPlaybookTab() {
   const [expandedReport, setExpandedReport] = useState<string | null>(null);
 
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
-  const [deployingVersion, setDeployingVersion] = useState<string | null>(null);
-  const [deploymentStatus, setDeploymentStatus] = useState<DeploymentStatus | null>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
 
   const { data: versions, error: versionsError } = useSWR<ModelVersion[]>(apiUrl("/api/models/versions"), fetcher, {
@@ -114,43 +112,10 @@ export function MLPlaybookTab() {
       const data = await res.json();
       if (data.job_id) {
         setActiveJobId(data.job_id);
-        setDeploymentStatus(null);
         mutate(apiUrl("/api/jobs"));
       }
     } catch {
       console.error("Retrain launch error:");
-    }
-  };
-
-  const handleDeployVersion = async (version: string) => {
-    setDeployingVersion(version);
-    setDeploymentStatus(null);
-    try {
-      const res = await fetch(apiUrl("/api/models/deploy"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ version })
-      });
-      const data = await res.json();
-      if (res.ok && data.status === "success") {
-        setDeploymentStatus({
-          success: true,
-          msg: `Version ${version} successfully deployed as system default. Monitor service restarted.`
-        });
-        mutate(apiUrl("/api/models/versions"));
-      } else {
-        setDeploymentStatus({
-          success: false,
-          msg: data.detail || "Deployment failed."
-        });
-      }
-    } catch {
-      setDeploymentStatus({
-        success: false,
-        msg: "Network error during model deployment."
-      });
-    } finally {
-      setDeployingVersion(null);
     }
   };
 
@@ -176,20 +141,6 @@ export function MLPlaybookTab() {
           </div>
         )}
       </div>
-
-      {deploymentStatus && (
-        <div className={`p-4 rounded-xl border flex items-start gap-3 duration-300 ${
-          deploymentStatus.success
-            ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-            : 'bg-rose-500/10 border-rose-500/20 text-rose-400'
-        }`}>
-          {deploymentStatus.success ? <CheckCircle2 className="w-5 h-5 flex-shrink-0" /> : <AlertTriangle className="w-5 h-5 flex-shrink-0" />}
-          <div>
-            <h4 className="font-semibold text-sm">{deploymentStatus.success ? "Model Deployed Successfully" : "Model Deployment Failed"}</h4>
-            <p className="text-xs mt-1 leading-relaxed opacity-90">{deploymentStatus.msg}</p>
-          </div>
-        </div>
-      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
@@ -441,7 +392,7 @@ export function MLPlaybookTab() {
                 <th className="px-6 py-4">Recall</th>
                 <th className="px-6 py-4">F1 Score</th>
                 <th className="px-6 py-4">Report</th>
-                <th className="px-6 py-4 text-right">Deployment Status</th>
+                <th className="px-6 py-4 text-right">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
@@ -515,22 +466,12 @@ export function MLPlaybookTab() {
                         {isCurrent ? (
                           <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
                             <CheckCircle2 className="w-3.5 h-3.5" />
-                            Deployed Default
+                            Active
                           </span>
                         ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleDeployVersion(ver.version)}
-                            disabled={deployingVersion === ver.version}
-                            className="bg-slate-800 hover:bg-slate-700 text-white font-bold px-3 py-1.5 rounded-xl transition duration-150 border border-white/5 flex items-center gap-1 inline-flex hover:border-emerald-500/20"
-                          >
-                            {deployingVersion === ver.version ? (
-                              <RotateCw className="w-3 h-3 animate-spin" />
-                            ) : (
-                              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                            )}
-                            Deploy Checkpoint
-                          </button>
+                          <span className="text-[10px] text-slate-600 font-medium">
+                            Archived
+                          </span>
                         )}
                       </td>
                     </tr>

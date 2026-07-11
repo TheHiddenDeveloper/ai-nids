@@ -33,10 +33,19 @@ Architecture (AE):
 """
 
 import hashlib
+import os
 import joblib
 import numpy as np
 from pathlib import Path
 from loguru import logger
+
+# Suppress TF/CUDA noise and show full tracebacks (Keras 3.12 hides them by default)
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+try:
+    import keras
+    keras.config.disable_traceback_filtering()
+except Exception:
+    pass
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
@@ -204,14 +213,20 @@ def train_autoencoder(
             print(f"[METRIC] epoch: {epoch + 1}, loss: {logs.get('loss', 0):.6f}, val_loss: {logs.get('val_loss', 0):.6f}", flush=True)
 
     logger.info(f"Training High-Precision Autoencoder (epochs={epochs}, batch_size={batch_size}, learning_rate={learning_rate})...")
-    autoencoder.fit(
-        X_train_s, X_train_s,
-        epochs=epochs,
-        batch_size=batch_size,
-        validation_split=0.1,
-        verbose=1,
-        callbacks=[MetricLoggingCallback()],
-    )
+    try:
+        autoencoder.fit(
+            X_train_s, X_train_s,
+            epochs=epochs,
+            batch_size=batch_size,
+            validation_split=0.1,
+            verbose=1,
+            callbacks=[MetricLoggingCallback()],
+        )
+    except Exception as e:
+        logger.error(f"AE training failed at epoch: {type(e).__name__}: {e}")
+        import traceback
+        logger.debug(f"Full AE training traceback:\n{traceback.format_exc()}")
+        raise
 
     # Threshold from calibration set (never seen during training or eval)
     cal_reconstructions = autoencoder.predict(X_cal_s, verbose=0)

@@ -37,10 +37,15 @@ import pandas as pd
 import numpy as np
 import sqlite3
 import json
-import joblib
 import sys
 import os
 from pathlib import Path
+
+# Suppress joblib/loky "cat not found" warning on WSL/minimal environments
+# MUST be before import joblib, which triggers loky core detection at import time
+os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(os.cpu_count() or 4))
+
+import joblib
 
 # ── Virtual Environment Check ────────────────────────────────────────────────
 def check_venv():
