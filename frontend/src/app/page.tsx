@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import useSWR from "swr";
 import { ShieldAlert, Activity, BarChart3, Settings as SettingsIcon, Globe2, MonitorPlay, ShieldCheck, Crosshair, Sun, Moon, SlidersHorizontal, ChevronDown } from "lucide-react";
 import { OverviewTab } from "./components/OverviewTab";
@@ -222,7 +222,10 @@ function DashboardInner() {
 
   const isConnected = !kpisError && kpis !== undefined;
 
-  const alerts = alertsRaw?.filter((a: Alert) => sevFilter.includes(a.severity)) || [];
+  const alerts = useMemo(
+    () => alertsRaw?.filter((a: Alert) => sevFilter.includes(a.severity)) || [],
+    [alertsRaw, sevFilter]
+  );
 
   const tabs = [
     { id: "overview", label: "Overview", icon: Activity },

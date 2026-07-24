@@ -1,0 +1,384 @@
+================================================================================
+                         AI-NIDS: COMPLETE REFERENCE
+================================================================================
+
+--------------------------------------------------------------------------------
+                           1. PROJECT OVERVIEW
+--------------------------------------------------------------------------------
+
+A Python-based Network Intrusion Detection System combining three detection
+engines:
+
+  Engine               Type           Weight   Purpose
+  -------------------  -------------  ------   --------------------------------
+  Random Forest (RF)   Supervised ML  65%     Classifies known attack patterns
+  Autoencoder (AE)     Unsupervised   35%     Anomaly detection on unseen attacks
+  Signature Engine     Rule-based     Override Detects specific known threats via YAML rules
+
+Architecture:
+  Packet capture -> Flow aggregation -> Feature extraction -> Ensemble inference
+  -> Alert classification -> Dashboard
+
+--------------------------------------------------------------------------------
+                           2. ML MODELS
+--------------------------------------------------------------------------------
+
+RANDOM FOREST (RF)
+  File:        ai_engine/trainer.py -> train_random_forest()
+  Trees:       500 (high precision) or 100 (standard)
+  max_depth:   20
+  class_weight: "balanced"
+  Preprocessing: StandardScaler -> SMOTE (class balancing)
+  Inference:   predict_proba(X_scaled)[:, 1] -> P(attack)
+  Artifacts:   nids_model.joblib, scaler.joblib, feature_metadata.joblib
+
+AUTOENCODER (AE)
+  File:        ai_engine/trainer.py -> train_autoencoder()
+  Architecture (symmetric encoder-decoder):
+    Input(30) -> Dense(64,relu) -> Dense(32,relu) -> Dense(16,relu) -> Dense(8) [latent]
+    -> Dense(16,relu) -> Dense(32,relu) -> Dense(64,relu) -> Dense(30,linear)
+  Trained on BENIGN traffic only (semi-supervised anomaly detection)
+  Threshold:   95th percentile of benign reconstruction MSE
+  Score norm:  ae_score = clip(mse / (threshold * 2.0), 0, 1)
+  Artifacts:   autoencoder.keras, ae_scaler.joblib, ae_threshold.joblib, ae_calibration.joblib
+
+ENSEMBLE COMBINATION
+  ensemble_score = 0.65 * rf_score + 0.35 * ae_score
+  if ensemble_score >= 0.5 -> ATTACK, else -> BENIGN
+
+SEVERITY CLASSIFICATION
+  high:    >= 0.92
+  medium:  >= 0.80
+  low:     >= 0.65
+  dropped: < 0.65 (no signature match)
+  Note: Signature rule severity overrides ML severity.
+
+--------------------------------------------------------------------------------
+                           3. FEATURE SET (30 features)
+--------------------------------------------------------------------------------
+
+Defined in core/features.py (single source of truth).
+
+Base features (20):
+  dst_port, duration, src_bytes, dst_bytes, packet_count, avg_packet_len,
+  std_packet_len, flow_bytes_per_sec, flow_packets_per_sec,
+  fwd_packet_len_max, bwd_packet_len_max, flow_iat_mean, flow_iat_std,
+  flow_iat_max, flow_iat_min, fin_flag_count, syn_flag_count,
+  rst_flag_count, psh_flag_count, ack_flag_count
+
+Flag ratios (5):
+  syn_ratio, fin_ratio, rst_ratio, ack_ratio, psh_ratio
+
+Port categories (5):
+  port_is_web, port_is_mail, port_is_admin, port_is_db, port_is_dns
+
+Metadata (not fed to ML):
+  _src_ip, _dst_ip, _src_port, _dst_port, _protocol, _timestamp,
+  direction, _is_malformed
+
+--------------------------------------------------------------------------------
+                           4. REAL-TIME PIPELINE
+--------------------------------------------------------------------------------
+
+Packet Capture (scapy)
+  -> FlowAggregator (5-tuple key, O(1) stats)
+    -> FeatureExtractor (FV2 port categories, FV3 flag ratios)
+      -> EnsembleInferenceEngine (RF + AE scoring)
+        -> AlertEngine (severity + signature matching)
+          -> AlertDeduplicator (Redis SET NX, 60s window)
+            -> ThreatIntelManager (GeoIP, blocklist)
+              -> IncidentCorrelator (group by src_ip)
+                -> SQLite + EventBus
+
+Key Components:
+  - ShardedFlowStore: 16-shard concurrent dict, max 50K active flows
+  - Flow timeout: 20s (configurable), background maintenance every 10s
+  - Feature hash verification: Backward-compatible with older model versions
+
+--------------------------------------------------------------------------------
+                           5. CAPABILITIES
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+DETECTION CAPABILITIES
+--------------------------------------------------------------------------------
+
+1. Three Detection Engines
+   - Random Forest (65%): Known attack patterns from training data
+   - Autoencoder (35%): Novel/anomalous traffic via reconstruction error
+   - Signature Rules (override): 25 hardcoded threat signatures
+
+2. Attack Types Detected
+   - DoS/DDoS: SYN flood, UDP flood, ICMP flood, high-volume, slow DoS
+   - Port Scanning: Mass scan, FIN scan, NULL scan, XMAS scan, SYN scan, rapid scan
+   - C2/Beaconing: Low-packet callbacks, long-duration silent channels, IRC/Meterpreter
+   - Brute Force: SSH, FTP brute-force detection
+   - Exfiltration: Large uploads, DNS exfiltration
+   - Suspicious Services: Telnet, SMB, RDP, VNC, backconnect ports
+
+3. Alert Severity System
+   Three tiers (high >= 0.92, medium >= 0.80, low >= 0.65) with signature
+   override capability -- a matched rule's severity replaces the ML score.
+
+--------------------------------------------------------------------------------
+REAL-TIME MONITORING CAPABILITIES
+--------------------------------------------------------------------------------
+
+4. Live Packet Capture
+   - Captures raw packets via scapy on any network interface
+   - Supports TCP (all 6 flag bits), UDP, ICMP, IPv4/IPv6
+   - Pcap replay mode for offline analysis (--pcap file.pcap)
+   - Auto-detects network interface when set to "auto"
+
+5. Bidirectional Flow Aggregation
+   - Groups packets by 5-tuple (sorted so A->B = B->A)
+   - O(1) running statistics -- no individual packets stored
+   - Tracks: byte counts, packet counts, inter-arrival times (Welford's algorithm),
+     TCP flag counts
+   - Flow re-orientation: Corrects direction when SYN/ACK seen out of order
+   - ShardedFlowStore: 16-shard concurrent dictionary, supports 50K+ simultaneous flows
+   - Monotonic clock for accurate IAT in live mode
+
+6. 30-Feature Extraction Pipeline
+   Real-time computation of:
+   - Volume metrics (bytes/sec, packets/sec, packet lengths)
+   - Temporal metrics (IAT mean/std/max/min)
+   - Protocol metrics (flag counts + flag ratios)
+   - Contextual metrics (port categories: web/mail/admin/DB/DNS)
+
+--------------------------------------------------------------------------------
+NETWORK INTELLIGENCE CAPABILITIES
+--------------------------------------------------------------------------------
+
+7. Flow Direction Classification
+   Four states based on HOME_NET:
+   - Outbound: Internal -> External
+   - Inbound: External -> Internal
+   - Internal: Both endpoints in HOME_NET
+   - External: Both endpoints outside HOME_NET
+
+8. Threat Intelligence Enrichment
+   - GeoIP lookup via ip-api.com (country, city, lat/lon, ISP, ASN)
+   - Reputation scoring from community blocklists (Emerging Threats, Feodo Tracker)
+   - IP reputation caching in Redis (12-hour TTL)
+   - GeoIP caching (30-day TTL)
+
+9. Incident Correlation
+   - Groups alerts by source IP into incidents
+   - Tracks incident lifecycle (active -> closed)
+   - Aggregates alert counts, max severity per incident
+
+--------------------------------------------------------------------------------
+RESPONSE CAPABILITIES
+--------------------------------------------------------------------------------
+
+10. Alert Deduplication
+    - Redis SET NX + TTL (60s window) suppresses duplicate alerts
+    - Tracks suppression count per source
+    - Prevents alert storms from flooding the dashboard
+
+11. Active Firewall Integration
+    - Block/unblock IPs via Redis pub/sub command channel
+    - FirewallEngine receives commands and applies iptables rules
+    - Blocked IP tracking in Redis set
+    - Dashboard can trigger blocks directly from alert drill-down
+
+12. Data Retention Management
+    - Configurable retention (default 30 days)
+    - Automatic cleanup runs every ~17 minutes
+    - WAL checkpoint + VACUUM after cleanup
+
+--------------------------------------------------------------------------------
+SELF-LEARNING CAPABILITIES
+--------------------------------------------------------------------------------
+
+13. Model Retraining Pipeline
+    - Standard (fast, 100 trees) or High Precision (500 trees) training modes
+    - Configurable: epochs, batch size, learning rate, SMOTE ratio
+    - SMOTE handles class imbalance (attacks are minority class)
+    - Autoencoder trained on benign only with threshold calibration at 95th percentile
+    - Optional PCA dimensionality reduction
+
+14. Live Data Feedback Loop (TD3)
+    - High-confidence predictions (score >= 0.95) within 30s windows are fed back
+      as training data
+    - Enables continuous improvement without manual labeling
+
+15. Model Versioning & Deployment
+    - Full version registry in data/models/registry.json
+    - Per-version: confusion matrix, ROC curve, per-class metrics, attack type breakdown
+    - Atomic deployment: Write to .tmp then os.replace() -- no partial writes
+    - Feature hash verification: Old models work with new feature extractors automatically
+
+16. ONNX Export (Optional)
+    - RF and AE can be exported to ONNX format for faster inference via onnxruntime
+
+--------------------------------------------------------------------------------
+DASHBOARD CAPABILITIES
+--------------------------------------------------------------------------------
+
+17. 8-Tab Dashboard
+    - Overview:    Real-time KPIs, alert volume timeline, severity lane visualization
+    - Alerts:      Searchable/filterable table, AI explainability, drill-down drawer
+    - Incidents:   Force-directed network topology graph + Leaflet geo map
+    - Top Offenders: Aggregated stats: top IPs, ports, severity distribution, attack paths
+    - Analytics:   Score distribution histogram, port vulnerability pie chart
+    - ML Playbook: Live training diagnostics, loss curves, model comparison table
+    - Signatures:  Toggle/edit rules, tag management, severity changes
+    - Settings:    Health checks, blocked IPs, log viewer, data wipe
+
+18. AI Explainability
+    Every alert includes:
+    - Driver model (which engine flagged it: RF, AE, or Signature)
+    - Top contributing features with bar visualization
+    - RF probability and AE anomaly MSE breakdown
+    - Confidence score (distance from threshold)
+
+19. IP Drill-Down
+    Click any IP to see: summary cards, threat intel, activity timeline,
+    related IPs, recent alerts, block/unblock action.
+
+20. Additional Frontend Features
+    - Dark/light theme with persistence
+    - Keyboard shortcuts (R=refresh, /=search, 1-8=tab switching)
+    - PDF export via jsPDF
+    - Mobile-responsive with bottom navigation bar
+    - Drag-and-drop widgets (via @dnd-kit)
+    - Error boundaries per tab
+    - Notification panel with real-time alert bell
+
+--------------------------------------------------------------------------------
+SYSTEM CAPABILITIES
+--------------------------------------------------------------------------------
+
+21. Dual Logging
+    - JSONL (monitor/logger.py) for structured log analysis
+    - SQLite (monitor/db.py) for persistent storage + API queries
+
+22. Hot-Reloadable Signatures
+    - watchdog inotify for instant rule reload on file change
+    - Falls back to 5s polling if watchdog unavailable
+    - Thread-safe with RLock; bad YAML preserves existing rules
+
+23. Optional Redis Layer
+    When enabled (default):
+    - Distributed flow aggregation across multiple sensors
+    - Cross-instance alert deduplication
+    - Pub/sub event broadcasting
+    - GeoIP/reputation caching
+    - Firewall command channel
+    When disabled: In-memory fallbacks keep everything working.
+
+24. Rate-Limited API
+    17 REST endpoints with per-route rate limiting (2-100/min) via slowapi.
+    Optional API key auth.
+
+25. Deployment
+    - Systemd services: monitor (root) + API (user)
+    - Auto-detects network interface
+    - Configures sudoers for API -> monitor restart
+    - One-command deploy: sudo bash scripts/deploy.sh
+
+26. Signature-Only Mode
+    Run with --no-model to use only the rule engine -- no ML models needed.
+    Useful for lightweight deployments or testing rules.
+
+--------------------------------------------------------------------------------
+                           6. SIGNATURE/RULE ENGINE
+--------------------------------------------------------------------------------
+
+25 rules in rules.yaml (23 enabled, 2 disabled). Hot-reload via watchdog inotify.
+
+Rule Format:
+  - id: UNIQUE_RULE_ID
+    name: Human-readable name
+    severity: high|medium|low
+    enabled: true|false
+    tags: [category1, category2]
+    conditions:
+      - field: feature_name
+        op: gt|lt|gte|lte|eq|neq|in|not_in|contains
+        value: threshold
+
+Logic: All conditions must match (AND). Rule severity overrides ML severity.
+
+Rule Categories:
+  DoS/Flood (4):      SYN flood, UDP flood, ICMP flood, high volume, low-volume slow DoS
+  Port Scanning (6):  Mass scan, FIN scan, NULL scan, XMAS scan, SYN scan, rapid scan
+  C2/Beaconing (2):   Low-packet callbacks, long-duration silent channels
+  Suspicious (6):     Telnet, SMB, RDP, VNC, IRC, Meterpreter, backconnect ports
+  Brute Force (3):    SSH, FTP brute-force
+  Exfiltration (1):   Large upload detection
+
+--------------------------------------------------------------------------------
+                           7. DATABASE (SQLite)
+--------------------------------------------------------------------------------
+
+WAL mode for concurrent reads. 3 tables:
+  - flows:    timestamp, src/dst IPs, port, score, direction, raw_json
+  - alerts:   + severity, signature_match, incident_id, country/city/asn, threat_level
+  - incidents: groups alerts by src_ip, tracks status (active/closed)
+
+Data retention: Configurable (default 30 days), runs every ~17 minutes.
+
+--------------------------------------------------------------------------------
+                           8. API (FastAPI, 17 endpoints)
+--------------------------------------------------------------------------------
+
+  Endpoint                            Purpose
+  ----------------------------------  ------------------------------------------
+  GET  /api/kpis                      Dashboard KPIs with 24h comparison
+  GET  /api/alerts                    Paginated alert history
+  GET  /api/flows                     Paginated flow records
+  GET  /api/incidents                 Incident list
+  POST /api/models/retrain            Trigger background retraining
+  POST /api/models/deploy             Deploy model version
+  GET  /api/models/versions           Model version registry
+  GET  /api/models/reports/{v}        Training report + images
+  GET  /api/settings/health           Model + Redis health check
+  POST /api/settings/firewall         Block/unblock IP
+  POST /api/settings/wipe             Clear all data
+  GET  /api/signatures                List signature rules
+  POST /api/signatures/{id}/toggle    Enable/disable rule
+  PUT  /api/signatures/{id}           Update rule
+  POST /api/system/monitor/restart    Restart capture service
+  GET  /api/system/logs               System log viewer
+
+Auth: Optional API key via X-API-Key header.
+Rate limiting: Per-endpoint via slowapi (2-100/min).
+
+--------------------------------------------------------------------------------
+                           9. TESTING
+--------------------------------------------------------------------------------
+
+16 test files, ~87 tests. Hybrid: some pytest, some standalone scripts.
+
+  Test                           What it validates
+  ----------------------------   ------------------------------------------
+  test_system_guard.py           Full end-to-end pipeline (883 lines)
+  test_rules_comprehensive.py    Every signature rule (624 lines)
+  test_core_components.py        EventBus, deduplicator, stats tracker
+  test_flow_aggregator.py        Packet grouping, bidirectional keying
+  test_ensemble_engine.py        Model loading, prediction contract
+  test_redis_*.py                Distributed aggregation, pub/sub, dedup
+
+Destructive tests: Some call flushdb() (wipes Redis) or clear_db_data() (wipes SQLite).
+
+--------------------------------------------------------------------------------
+                           10. KEY GOTCHAS
+--------------------------------------------------------------------------------
+
+1.  FEATURE_COLS is in core/features.py -- config.yaml is documentation-only
+2.  AE trains on benign only -- reconstruction error = anomaly score
+3.  Signature severity overrides ML severity -- not the other way around
+4.  SMOTE is applied -- handles class imbalance (attacks are minority)
+5.  Feature hash verification -- backward-compatible with older models
+6.  Redis is optional -- in-memory fallbacks exist
+7.  SQLite auto-inits on import -- schema created at first connection
+8.  Hot-reload via inotify -- not polling (watchdog preferred)
+9.  No WebSockets -- frontend uses SWR polling for "real-time"
+10. Two separate processes -- monitor (root) + API (user), communicate via SQLite/Redis
+
+================================================================================
+                          END OF REFERENCE
+================================================================================

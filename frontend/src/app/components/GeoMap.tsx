@@ -19,7 +19,7 @@ const SEVERITY_RADIUS: Record<string, number> = {
 
 function MapLegend() {
   return (
-    <div className="absolute bottom-4 left-4 z-[1000] bg-slate-900/90 backdrop-blur-sm border border-white/10 rounded-lg p-3 text-xs shadow-lg">
+    <div       className="absolute bottom-4 left-4 z-[3000] bg-slate-900/90 backdrop-blur-sm border border-white/10 rounded-lg p-3 text-xs shadow-lg">
       <p className="text-slate-400 font-semibold mb-2">Severity</p>
       {Object.entries(SEVERITY_COLOR).map(([sev, color]) => (
         <div key={sev} className="flex items-center gap-2 mb-1">
@@ -50,15 +50,15 @@ function MapView({
   onIPClick: (ip: string) => void;
 }) {
   const [L, setL] = useState<typeof import("leaflet") | null>(null);
-  const [mapReady, setMapReady] = useState(false);
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<import("leaflet").Map | null>(null);
+  const markersRef = useRef<import("leaflet").CircleMarker[]>([]);
+  const pointsKeyRef = useRef<string>("");
 
   useEffect(() => {
     import("leaflet").then((mod) => {
       setL(mod.default || mod);
     });
-    // Inject Leaflet CSS
     if (!document.getElementById("leaflet-css")) {
       const link = document.createElement("link");
       link.id = "leaflet-css";
@@ -83,8 +83,29 @@ function MapView({
       maxZoom: 19,
     }).addTo(map);
 
-    // Add markers
-    const markers: import("leaflet").CircleMarker[] = [];
+    mapInstanceRef.current = map;
+
+    return () => {
+      map.remove();
+      mapInstanceRef.current = null;
+    };
+  }, [L]);
+
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || !L) return;
+
+    const newKey = points
+      .map((p) => `${p.lat},${p.lng}:${p.severity}:${p.count}`)
+      .join("|");
+    if (newKey === pointsKeyRef.current) return;
+    pointsKeyRef.current = newKey;
+
+    for (const m of markersRef.current) {
+      m.remove();
+    }
+    markersRef.current = [];
+
     for (const p of points) {
       const marker = L.circleMarker([p.lat, p.lng], {
         radius: SEVERITY_RADIUS[p.severity as keyof typeof SEVERITY_RADIUS] + Math.min(p.count, 5),
@@ -94,32 +115,24 @@ function MapView({
         weight: 1,
       }).addTo(map);
 
-      marker.bindPopup(`
-        <div style="font-family: system-ui, sans-serif; font-size: 12px;">
-          <p style="font-family: monospace; font-weight: bold; color: #059669; margin: 0 0 4px 0;">${p.ip}</p>
-          <p style="color: #64748b; margin: 0 0 2px 0;">${p.city ? p.city + ", " : ""}${p.country || "Private IP"}</p>
-          <p style="color: #64748b; margin: 0 0 2px 0;">Severity: <strong style="text-transform: capitalize;">${p.severity}</strong></p>
-          <p style="color: #64748b; margin: 0;">Alerts from origin: ${p.count}</p>
-        </div>
-      `);
+      marker.bindTooltip(
+        `<div style="font-family: system-ui, sans-serif; font-size: 11px; line-height: 1.4;">
+          <span style="font-family: monospace; font-weight: bold; color: #059669;">${p.ip}</span><br/>
+          <span style="color: #94a3b8;">${p.city ? p.city + ", " : ""}${p.country || "Private"}</span><br/>
+          <span style="color: ${SEVERITY_COLOR[p.severity]}; text-transform: capitalize; font-weight: 600;">${p.severity}</span>
+          <span style="color: #64748b;"> &middot; ${p.count} alert${p.count !== 1 ? "s" : ""}</span>
+        </div>`,
+        { direction: "top", offset: [0, -10], opacity: 1, className: "nids-tooltip" }
+      );
 
       marker.on("click", () => onIPClick(p.ip));
-      markers.push(marker);
+      markersRef.current.push(marker);
     }
 
-    // Fit bounds
     if (points.length > 0) {
       const bounds = L.latLngBounds(points.map((p) => [p.lat, p.lng] as [number, number]));
       map.fitBounds(bounds, { padding: [40, 40], maxZoom: 6 });
     }
-
-    mapInstanceRef.current = map;
-    setMapReady(true);
-
-    return () => {
-      map.remove();
-      mapInstanceRef.current = null;
-    };
   }, [L, points, onIPClick]);
 
   return (
@@ -208,7 +221,7 @@ export function GeoMap({ alerts }: { alerts: Alert[] }) {
       </div>
 
       <div
-        className="bg-slate-900 border border-white/5 rounded-2xl overflow-hidden relative"
+        className="bg-slate-900 border border-white/5 rounded-2xl relative"
         style={{ height: 520 }}
       >
         <MapView points={uniquePoints} onIPClick={setDrilldownIP} />
