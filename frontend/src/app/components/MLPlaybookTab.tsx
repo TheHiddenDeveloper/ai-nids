@@ -415,7 +415,7 @@ export function MLPlaybookTab() {
                       <td className="px-6 py-4 text-slate-400 font-medium">
                         <span className="flex items-center gap-1.5">
                           <Calendar className="w-3.5 h-3.5" />
-                          {ver.timestamp ? new Date(ver.timestamp).toLocaleString() : "N/A"}
+                          {ver.timestamp ? new Date(ver.timestamp * 1000).toLocaleString() : "N/A"}
                         </span>
                       </td>
                       <td className="px-6 py-4 font-mono text-[10px] text-slate-400 max-w-[200px]">
