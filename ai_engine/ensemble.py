@@ -218,9 +218,9 @@ class EnsembleInferenceEngine:
 
         if cal_path.exists():
             cal = joblib.load(cal_path)
-            self._ae_mse_mean = float(cal.get("mse_mean", 0.0))
-            self._ae_mse_std  = float(cal.get("mse_std", 1.0))
-            logger.info(f"AE calibration loaded (mse_mean={self._ae_mse_mean:.6f}, mse_std={self._ae_mse_std:.6f})")
+            self._ae_mse_mean = float(cal.get("mse_log_mean", cal.get("mse_mean", 0.0)))
+            self._ae_mse_std  = float(cal.get("mse_log_std", cal.get("mse_std", 1.0)))
+            logger.info(f"AE calibration loaded (log1p mean={self._ae_mse_mean:.6f}, log1p std={self._ae_mse_std:.6f})")
         else:
             self._ae_mse_mean = 0.0
             self._ae_mse_std  = 1.0
@@ -271,11 +271,11 @@ class EnsembleInferenceEngine:
     def _ae_score(self, X: np.ndarray, X_scaled: np.ndarray = None) -> np.ndarray:
         """
         Return normalised anomaly score from AE, shape (n,).
-        Uses threshold-relative scaling: score = mse / (threshold * 2.0).
-        At threshold (p95 of benign MSE on calibration set): score = 0.5
-        At 2x threshold: score = 1.0
-        At mean (typical benign): score ≈ 0.13
-        Clipped to [0, 1].
+        M4: z-score sigmoid normalisation — score = sigmoid((mse - mse_mean)/mse_std).
+        mse_mean/mse_std come from the AE calibration set (benign flows).
+        At mean benign reconstruction error: score = 0.5
+        At mean + 1σ: score ≈ 0.73 ; at mean + 3σ: score ≈ 0.95
+        Robust to scale of the raw MSE across datasets/features.
         M2: accepts optional pre-scaled array to avoid double transform.
         M6: ONNX inference path if available.
         """
@@ -287,7 +287,16 @@ class EnsembleInferenceEngine:
         else:
             reconstructions = self._ae.predict(X_s, verbose=0)
         mse = np.mean(np.power(X_s - reconstructions, 2), axis=1)
-        normalised = np.clip(mse / (self._ae_threshold * 2.0), 0.0, 1.0)
+        # M4: z-score sigmoid on log1p(mse). Raw MSE is heavily right-skewed in
+        # the benign calibration set (extreme outliers inflate raw std and pin
+        # the sigmoid near 0.5); log1p is near log-normal and gives a
+        # meaningful gradient: benign ≈ 0.4, anomalies → 1.0.
+        log_mse = np.log1p(np.maximum(mse, 0.0))
+        if self._ae_mse_std <= 0:
+            z = np.zeros_like(log_mse)
+        else:
+            z = (log_mse - self._ae_mse_mean) / self._ae_mse_std
+        normalised = 1.0 / (1.0 + np.exp(-z))
         return normalised
 
     def _batch_explain(self, X: np.ndarray, rf_scores: np.ndarray, ae_scores: np.ndarray,

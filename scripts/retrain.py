@@ -46,6 +46,7 @@ import joblib
 from loguru import logger
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, accuracy_score, precision_recall_fscore_support
 
@@ -275,11 +276,15 @@ def retrain(
     X_test_s = scaler.transform(X_test)
 
     logger.info("Retraining Random Forest on online data...")
-    rf = RandomForestClassifier(
+    base_rf = RandomForestClassifier(
         n_estimators=100, max_depth=15, n_jobs=-1,
         random_state=42, class_weight="balanced",
     )
-    rf.fit(X_train_s, y_train)
+    base_rf.fit(X_train_s, y_train)
+
+    calibrated_rf = CalibratedClassifierCV(base_rf, method="sigmoid", cv=5)
+    calibrated_rf.fit(X_train_s, y_train)
+    rf = calibrated_rf
 
     # ── AE retrain (RT1) ──
     X_benign_train = X_train[y_train == 0]

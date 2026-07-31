@@ -483,7 +483,9 @@ export function AlertsTab({ alerts }: { alerts: Alert[] }) {
                 </div>
                 
                 <div className="text-right">
-                  <span className="text-[9px] text-slate-500 uppercase tracking-wider block">ML Confidence</span>
+                  <span className="text-[9px] text-slate-500 uppercase tracking-wider block">
+                    {selectedAlertForDrawer.signature_match ? 'ML Score (Sig-Confirmed)' : 'ML Confidence'}
+                  </span>
                   <span className="text-lg font-mono font-bold text-white">
                     {(selectedAlertForDrawer.score * 100).toFixed(1)}%
                   </span>

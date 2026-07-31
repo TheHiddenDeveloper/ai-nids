@@ -32,7 +32,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from loguru import logger
 
-from core.features import FEATURE_COLS
+from core.features import FEATURE_COLS, compute_probe_features_vec, compute_flood_features_vec
 
 # ── CICIDS2017 column mapping ────────────────────────────────────────────────
 # Note: MachineLearningCSV.zip does not include a 'Protocol' column —
@@ -134,13 +134,18 @@ def _add_fv2_from_protocols(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _clean(df: pd.DataFrame, source_name: str) -> pd.DataFrame:
-    """Common cleaning: NaN/Inf removal, label normalisation."""
+    """Common cleaning: NaN/Inf zero-fill, label normalisation.
+
+    Matches production feature_extractor behaviour (replaces NaN/Inf with 0.0
+    rather than dropping rows) so the model trains on the same input
+    distribution it receives at inference time.
+    """
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     before = len(df)
-    df.dropna(inplace=True)
-    dropped = before - len(df)
-    if dropped:
-        logger.warning(f"[{source_name}] Dropped {dropped:,} rows with NaN/Inf ({dropped/before*100:.1f}%)")
+    nan_cols = df.columns[df.isna().any()].tolist()
+    if nan_cols:
+        df[nan_cols] = df[nan_cols].fillna(0.0)
+        logger.info(f"[{source_name}] Zero-filled NaN values in {len(nan_cols)} columns ({before:,} rows kept)")
 
     df["label"] = df["label"].str.strip()
     # Broad binary classification
@@ -179,12 +184,28 @@ def load_cicids2017(data_dir: str = "data/raw/cicids2017") -> pd.DataFrame:
 
     combined.rename(columns=CICIDS_COLUMN_MAP, inplace=True)
 
+    # CICIDS2017 stores time-based features in MICROSECONDS, but production
+    # (monitor/flow_aggregator.py) computes them in SECONDS from time.time().
+    # Convert here so training matches the inference-time input distribution.
+    # Flow Bytes/s and Flow Packets/s are already per-second in both.
+    for col in ("duration", "flow_iat_mean", "flow_iat_std", "flow_iat_max", "flow_iat_min"):
+        if col in combined.columns:
+            combined[col] = pd.to_numeric(combined[col], errors="coerce") / 1e6
+
     # Calculate total packet count if directional counts exist
     if "fwd_count" in combined.columns and "bwd_count" in combined.columns:
         combined["packet_count"] = combined["fwd_count"] + combined["bwd_count"]
 
     # FV2 + FV3
     combined = _add_fv2_fv3(combined)
+
+    # FV4 — probe/scan indicators (shared logic with production)
+    for feat, val in compute_probe_features_vec(combined).items():
+        combined[feat] = val
+
+    # FV5 — flood/DoS indicators (shared logic with production)
+    for feat, val in compute_flood_features_vec(combined).items():
+        combined[feat] = val
 
     needed = FEATURE_COLS + ["label"]
     available = [c for c in needed if c in combined.columns]
@@ -255,6 +276,14 @@ def load_ciciot2023(data_dir: str = "data/raw/ciciot2023") -> pd.DataFrame:
 
     # FV2 — protocol-based (no dst_port in CICIoT2023)
     combined = _add_fv2_from_protocols(combined)
+
+    # FV4 — probe/scan indicators (shared logic with production)
+    for feat, val in compute_probe_features_vec(combined).items():
+        combined[feat] = val
+
+    # FV5 — flood/DoS indicators (shared logic with production)
+    for feat, val in compute_flood_features_vec(combined).items():
+        combined[feat] = val
 
     # Fill remaining missing features with safe defaults
     # CICIoT2023 has no dst_port, flow_iat_std, flow_iat_max, flow_iat_min

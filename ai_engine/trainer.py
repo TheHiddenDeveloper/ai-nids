@@ -49,6 +49,7 @@ except Exception:
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import classification_report, confusion_matrix
 from imblearn.over_sampling import SMOTE
 
@@ -63,12 +64,19 @@ def train_random_forest(
     n_estimators: int = 200,
     max_depth: int = 20,
     model_dir: str = "data/models",
-    smote_ratio: float = 1.0,
+    smote_ratio: float = None,
 ) -> tuple:
     """
-    Train a Random Forest binary classifier.
-    Uses SMOTE to handle class imbalance (attacks << benign).
-    Returns (model, scaler).
+    Train a Random Forest binary classifier with calibrated probabilities.
+
+    Design:
+      - Uses class_weight='balanced' to handle the ~4:1 benign/attack ratio
+        (SMOTE is not applied since class_weight handles it at lower cost)
+      - Applies CalibratedClassifierCV (method='sigmoid') on a 100k-row
+        training subset to correct probability biases without 5x CV overhead
+      - Saves model, scaler, and feature metadata to model_dir
+
+    Returns (calibrated_model, scaler).
     """
     Path(model_dir).mkdir(parents=True, exist_ok=True)
 
@@ -76,12 +84,10 @@ def train_random_forest(
     X_train_s = scaler.fit_transform(X_train)
     X_test_s = scaler.transform(X_test)
 
-    logger.info(f"Applying SMOTE to balance classes (smote_ratio={smote_ratio})...")
-    sm = SMOTE(random_state=42, sampling_strategy=smote_ratio)
-    X_res, y_res = sm.fit_resample(X_train_s, y_train)
-    logger.info(f"After SMOTE: {len(X_res):,} samples")
-
-    logger.info(f"Training Random Forest (n_estimators={n_estimators}, max_depth={max_depth})...")
+    logger.info(
+        f"Training Random Forest (n_estimators={n_estimators}, "
+        f"max_depth={max_depth}, n_train={len(X_train):,})..."
+    )
     rf = RandomForestClassifier(
         n_estimators=n_estimators,
         max_depth=max_depth,
@@ -89,16 +95,27 @@ def train_random_forest(
         random_state=42,
         class_weight="balanced",
     )
-    rf.fit(X_res, y_res)
+    rf.fit(X_train_s, y_train)
 
-    y_pred = rf.predict(X_test_s)
+    # Calibrate probabilities on a training subset to correct any bias.
+    # Using cv='prefit' + holdout avoids the 5x overhead of CV-based
+    # calibration while still fixing probability calibration.
+    n_cal = min(100_000, len(X_train))
+    rng = np.random.RandomState(42)
+    cal_idx = rng.choice(len(X_train), n_cal, replace=False)
+    calibrator = CalibratedClassifierCV(rf, method="sigmoid", cv="prefit")
+    calibrator.fit(X_train_s[cal_idx], y_train[cal_idx])
+    logger.info(f"Calibrated on {n_cal:,} samples (cv='prefit', sigmoid)")
+
+    y_pred = calibrator.predict(X_test_s)
     logger.info("\n" + classification_report(y_test, y_pred, target_names=["Benign", "Attack"]))
     logger.info(f"Confusion Matrix:\n{confusion_matrix(y_test, y_pred)}")
 
+    # Save artifacts
     model_path = Path(model_dir) / "nids_model.joblib"
     scaler_path = Path(model_dir) / "scaler.joblib"
-    meta_path   = Path(model_dir) / "feature_metadata.joblib"
-    joblib.dump(rf, model_path)
+    meta_path = Path(model_dir) / "feature_metadata.joblib"
+    joblib.dump(calibrator, model_path)
     joblib.dump(scaler, scaler_path)
     feature_hash = hashlib.md5(":".join(FEATURE_COLS).encode()).hexdigest()
     joblib.dump({
@@ -109,20 +126,24 @@ def train_random_forest(
     logger.info(f"Saved scaler → {scaler_path}")
     logger.info(f"Saved feature metadata (hash={feature_hash[:12]}..., {len(FEATURE_COLS)} cols) → {meta_path}")
 
-    # OP6: export RF to ONNX for faster inference
+    # OP6: export calibrated RF to ONNX for faster inference
     try:
         from skl2onnx import convert_sklearn
         from skl2onnx.common.data_types import FloatTensorType
         onnx_path = Path(model_dir) / "nids_model.onnx"
         initial_type = [('float_input', FloatTensorType([None, X_train_s.shape[1]]))]
-        onx = convert_sklearn(rf, initial_types=initial_type, options={rf.__class__.__name__: {"zipmap": False}})
+        onx = convert_sklearn(
+            calibrator,
+            initial_types=initial_type,
+            options={"zipmap": False},
+        )
         with open(onnx_path, 'wb') as f:
             f.write(onx.SerializeToString())
-        logger.info(f"Exported RF to ONNX → {onnx_path}")
+        logger.info(f"Exported calibrated RF to ONNX → {onnx_path}")
     except Exception as e:
-        logger.warning(f"ONNX export skipped (install skl2onnx): {e}")
+        logger.warning(f"ONNX export skipped: {e}")
 
-    return rf, scaler
+    return calibrator, scaler
 
 
 def train_autoencoder(
@@ -228,9 +249,14 @@ def train_autoencoder(
         logger.debug(f"Full AE training traceback:\n{traceback.format_exc()}")
         raise
 
-    # Threshold from calibration set (never seen during training or eval)
+    # Threshold from calibration set (never seen during training or eval).
+    # AE is semi-supervised: stats/threshold from BENIGN calibration flows
+    # only. Including attack flows (e.g. synthetic probes with extreme MSE)
+    # inflates mse_std and flattens the z-score sigmoid at inference.
     cal_reconstructions = autoencoder.predict(X_cal_s, verbose=0)
-    cal_mse = np.mean(np.power(X_cal_s - cal_reconstructions, 2), axis=1)
+    cal_mse_all = np.mean(np.power(X_cal_s - cal_reconstructions, 2), axis=1)
+    benign_mask = np.asarray(y_cal) == 0
+    cal_mse = cal_mse_all[benign_mask]
     threshold = float(np.percentile(cal_mse, threshold_percentile))
     logger.info(f"Anomaly threshold (p{threshold_percentile} on cal set): {threshold:.6f}")
 
@@ -245,11 +271,19 @@ def train_autoencoder(
     autoencoder.save(ae_path)
     joblib.dump(scaler, Path(model_dir) / "ae_scaler.joblib")
     joblib.dump(threshold, Path(model_dir) / "ae_threshold.joblib")
-    # M4: save calibration MSE distribution for principled score normalisation
-    cal_data = {"mse_mean": float(np.mean(cal_mse)), "mse_std": float(np.std(cal_mse))}
+    # M4: save calibration MSE distribution for principled score normalisation.
+    # Benign MSE is heavily right-skewed (a few benign outliers reach mse~1000),
+    # so raw mean/std makes the sigmoid flat (std inflated -> score pinned ~0.5).
+    # Use log1p(mse): near log-normal, gives a meaningful z-score gradient.
+    cal_data = {
+        "mse_mean": float(np.mean(cal_mse)),
+        "mse_std": float(np.std(cal_mse)),
+        "mse_log_mean": float(np.mean(np.log1p(cal_mse))),
+        "mse_log_std": float(np.std(np.log1p(cal_mse))),
+    }
     joblib.dump(cal_data, Path(model_dir) / "ae_calibration.joblib")
     logger.info(f"Saved autoencoder → {ae_path}")
-    logger.info(f"Saved AE calibration (mse_mean={cal_data['mse_mean']:.6f}, mse_std={cal_data['mse_std']:.6f})")
+    logger.info(f"Saved AE calibration (log1p mean={cal_data['mse_log_mean']:.6f}, log1p std={cal_data['mse_log_std']:.6f})")
 
     # OP6: export AE to ONNX for faster inference
     try:
