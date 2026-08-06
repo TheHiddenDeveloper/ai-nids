@@ -4,12 +4,24 @@ ENSEMBLE INFERENCE ENGINE — RF + Autoencoder Fusion
 ================================================================================
 Purpose:
   Combines Random Forest (supervised, known attack patterns) and Autoencoder
-  (unsupervised, anomaly detection on benign baseline) into a single weighted
-  attack probability score.
+  (unsupervised, anomaly detection on benign baseline) into a single attack
+  probability score.
 
-  Final score = rf_weight * rf_score + ae_weight * ae_score
+  Dynamic per-flow split (default): each engine's weight is proportional to
+  how decisive it is for that flow (|score - 0.5|), so the engine with the
+  strongest signal carries that flow's score. When the two engines AGREE the
+  decisive one dominates (reinforcement); when they DISAGREE the score is
+  dampened toward 0.5 (honest uncertainty). RF keeps a minimum weight
+  (min_rf_weight, default 0.5) because it is better calibrated than the AE.
 
-  Default weights from config.yaml: rf=0.65, ae=0.35
+    rf_w_eff = clip(|rf-0.5| / (|rf-0.5| + |ae-0.5|), min_rf, 1-min_rf)
+    blend    = rf_w_eff * rf_score + ae_w_eff * ae_score
+    score    = blend                if RF and AE agree
+               threshold + (blend - threshold) * 0.5   otherwise
+
+  Static fallback (config dynamic_weights: false):
+    score = rf_weight * rf_score + ae_weight * ae_score
+  Defaults: rf=0.65, ae=0.35.
 
 Usage:
   engine = EnsembleInferenceEngine(model_dir="data/models")
@@ -60,6 +72,8 @@ class EnsembleInferenceEngine:
         self.model_dir  = Path(model_dir)
         self.rf_weight  = rf_weight
         self.ae_weight  = ae_weight
+        self.dynamic_weights = True
+        self.min_rf_weight   = 0.5
 
         # RF components (ONNX + joblib fallback — OP6)
         self._rf       = None
@@ -103,6 +117,8 @@ class EnsembleInferenceEngine:
         if self.ae_weight is None:
             self.ae_weight = model_cfg.get("ae_weight", 0.50)
         self._threshold = model_cfg.get("anomaly_threshold", 0.5)
+        self.dynamic_weights = bool(model_cfg.get("dynamic_weights", True))
+        self.min_rf_weight = float(model_cfg.get("min_rf_weight", 0.5))
 
     # ── Loading ───────────────────────────────────────────────────────────────
 
@@ -156,7 +172,9 @@ class EnsembleInferenceEngine:
         if self._rf_loaded and self._ae_loaded:
             logger.info(
                 f"Ensemble loaded | RF weight={self.rf_weight} "
-                f"AE weight={self.ae_weight}"
+                f"AE weight={self.ae_weight} | "
+                f"dynamic_weights={self.dynamic_weights} "
+                f"min_rf_weight={self.min_rf_weight}"
             )
         elif self._rf_loaded:
             logger.info("Ensemble loaded | RF only (no autoencoder found — train with --model both)")
@@ -299,6 +317,37 @@ class EnsembleInferenceEngine:
         normalised = 1.0 / (1.0 + np.exp(-z))
         return normalised
 
+    def _dynamic_combine(self, rf_scores: np.ndarray, ae_scores: np.ndarray):
+        """
+        Per-flow dynamic split of the confidence between RF and AE.
+
+        Each engine's weight for a flow is proportional to how decisive it is
+        there (distance from the 0.5 decision boundary), so the engine with
+        the strongest signal carries that flow. RF weight is clamped to
+        [min_rf_weight, 1 - min_rf_weight] because RF is better calibrated
+        than the AE (which over-flags benign live traffic).
+
+        When both engines agree on direction the weighted blend stands
+        (reinforcement); when they disagree the blend is dampened toward the
+        threshold (honest uncertainty — prevents AE over-flagging from
+        producing false positives).
+
+        Returns (scores, rf_w, ae_w) — the per-flow effective weights.
+        """
+        rf_c = np.abs(rf_scores - self._threshold)
+        ae_c = np.abs(ae_scores - self._threshold)
+        total = rf_c + ae_c
+        rf_w = np.where(total > 0.0, rf_c / total, 0.5)
+        rf_w = np.clip(rf_w, self.min_rf_weight, 1.0)
+        ae_w = 1.0 - rf_w
+
+        blended = rf_w * rf_scores + ae_w * ae_scores
+
+        agree = (rf_scores > self._threshold) == (ae_scores > self._threshold)
+        damp = np.where(agree, blended, self._threshold + (blended - self._threshold) * 0.5)
+        scores = np.clip(damp, 0.0, 1.0)
+        return scores, rf_w, ae_w
+
     def _batch_explain(self, X: np.ndarray, rf_scores: np.ndarray, ae_scores: np.ndarray,
                        ensemble_scores: np.ndarray, X_ae_scaled_full: np.ndarray = None) -> dict:
         """
@@ -426,13 +475,18 @@ class EnsembleInferenceEngine:
         ae_scores = self._ae_score(X, X_scaled=X_ae_scaled) if self._ae_loaded else np.zeros(len(X))
 
         if self._rf_loaded and self._ae_loaded:
-            rf_w, ae_w = self.rf_weight, self.ae_weight
+            if self.dynamic_weights:
+                ensemble_scores, rf_w_eff, ae_w_eff = self._dynamic_combine(rf_scores, ae_scores)
+            else:
+                rf_w_eff = np.full(len(X), self.rf_weight)
+                ae_w_eff = np.full(len(X), self.ae_weight)
+                ensemble_scores = np.clip(rf_w_eff * rf_scores + ae_w_eff * ae_scores, 0.0, 1.0)
         elif self._rf_loaded:
-            rf_w, ae_w = 1.0, 0.0
+            rf_w_eff, ae_w_eff = np.ones(len(X)), np.zeros(len(X))
+            ensemble_scores = rf_scores
         else:
-            rf_w, ae_w = 0.0, 1.0
-
-        ensemble_scores = np.clip(rf_w * rf_scores + ae_w * ae_scores, 0.0, 1.0)
+            rf_w_eff, ae_w_eff = np.zeros(len(X)), np.ones(len(X))
+            ensemble_scores = ae_scores
 
         explanations = self._batch_explain(X, rf_scores, ae_scores, ensemble_scores, X_ae_scaled_full=X_ae_scaled)
 
@@ -448,6 +502,8 @@ class EnsembleInferenceEngine:
                 "score":    float(ens),
                 "rf_score": float(rf),
                 "ae_score": float(ae),
+                "rf_weight": round(float(rf_w_eff[i]), 4),
+                "ae_weight": round(float(ae_w_eff[i]), 4),
                 "label":    "ATTACK" if ens >= threshold else "BENIGN",
                 "_src_ip":    row.get("_src_ip"),
                 "_dst_ip":    row.get("_dst_ip"),
@@ -485,6 +541,8 @@ class EnsembleInferenceEngine:
             "ae_loaded":         self._ae_loaded,
             "rf_weight":         self.rf_weight,
             "ae_weight":         self.ae_weight,
+            "dynamic_weights":   self.dynamic_weights,
+            "min_rf_weight":     self.min_rf_weight,
             "ae_threshold":      self._ae_threshold,
             "classify_threshold": self._threshold,
         }
