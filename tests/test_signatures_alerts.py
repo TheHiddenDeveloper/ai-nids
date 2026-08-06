@@ -22,7 +22,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
 from signatures.checker import SignatureChecker
-from ai_engine.alert_engine import classify_severity, process_results
+from ai_engine.alert_engine import (
+    classify_severity,
+    process_results,
+    signature_confidence,
+    should_alert,
+)
 
 
 class TestSignatureChecker:
@@ -109,6 +114,53 @@ class TestAlertEngine:
         assert len(alerts) == 1
         assert alerts[0]["severity"] == "high"
         assert "signature_match" in alerts[0]
+
+    def test_ai_suppresses_signature_below_030(self):
+        """AI < 0.30 means confident benign: even a rule match must not alert."""
+        checker = SignatureChecker()
+        results = [{"score": 0.10, "label": "BENIGN", "syn_flag_count": 200, "ack_flag_count": 0, "direction": "inbound"}]
+        alerts = process_results(results, signature_checker=checker)
+        assert len(alerts) == 0
+
+    def test_signature_drives_in_uncertain_band(self):
+        """0.30 <= AI < 0.65 with signature_confidence >= 0.5 alerts, driver=signature."""
+        checker = SignatureChecker()
+        results = [{"score": 0.45, "label": "BENIGN", "syn_flag_count": 200, "ack_flag_count": 0, "direction": "inbound"}]
+        alerts = process_results(results, signature_checker=checker)
+        assert len(alerts) == 1
+        alert = alerts[0]
+        assert alert["signature_confidence"] >= 0.5
+        assert alert["driver"] == "signature"
+        assert alert["matched_rules"][0]["rule_id"] == "SYN_FLOOD_001"
+
+    def test_driver_ai_when_sig_absent(self):
+        alerts = process_results([{"score": 0.90, "label": "ATTACK"}])
+        assert len(alerts) == 1
+        assert alerts[0]["driver"] == "ai"
+        assert alerts[0]["signature_confidence"] == 0.0
+
+    def test_driver_both_when_ai_and_sig_agree(self):
+        checker = SignatureChecker()
+        results = [{"score": 0.90, "label": "ATTACK", "syn_flag_count": 200, "ack_flag_count": 0, "direction": "inbound"}]
+        alerts = process_results(results, signature_checker=checker)
+        assert len(alerts) == 1
+        assert alerts[0]["driver"] == "both"
+        assert alerts[0]["signature_confidence"] >= 0.5
+
+    def test_signature_confidence_probabilistic_or(self):
+        assert signature_confidence([]) == 0.0
+        assert signature_confidence([{"confidence": 0.5}]) == 0.5
+        assert round(signature_confidence([{"confidence": 0.5}, {"confidence": 0.5}]), 4) == 0.75
+        assert signature_confidence([{"severity": "high"}]) == 0.7  # default conf
+
+    def test_should_alert_matrix(self):
+        assert not should_alert(0.10, 0.99)     # AI confident benign wins
+        assert should_alert(0.30, 0.99)         # boundary: not < 0.30
+        assert should_alert(0.65, 0.0)          # AI alone
+        assert should_alert(0.90, 0.0)          # AI alone
+        assert should_alert(0.45, 0.50)         # sig in uncertain band
+        assert not should_alert(0.45, 0.49)     # sig below bar
+        assert not should_alert(0.30, 0.49)
 
     def test_mixed_batch(self):
         results = [

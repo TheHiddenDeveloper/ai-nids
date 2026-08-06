@@ -19,6 +19,8 @@
 9. [Validation Results](#9-validation-results)
 10. [What the Score Means in Plain English](#10-what-the-score-means-in-plain-english)
 11. [Operational Notes & Caveats](#11-operational-notes--caveats)
+12. [Attack-Matrix Harness & the "≥85% confidence" Baseline](#12-attack-matrix-harness--the-85-confidence-baseline)
+13. [Honest Alert Decisions: Signature-Confidence Fusion](#13-honest-alert-decisions-signature-confidence-fusion)
 
 ---
 
@@ -187,7 +189,9 @@ Each inference result now also exposes the effective per-flow weights (`rf_weigh
 - Their answers are blended per flow. When both lean the same way, the more convinced model carries the score; when they disagree, the score hedges toward 50% ("not sure").
 - **~0–50%** looks benign · **50%** is the decision line · **>50%** is flagged as an attack, with higher = stronger conviction.
 
-The bar on the dashboard is the score (attack likelihood). A low score does not necessarily mean no alert — signature rules can still force one.
+The bar on the dashboard is the score (attack likelihood). A separate, explicit
+**signature confidence** (see §13) can still produce an alert for uncertain flows, but
+a near-certain benign verdict from the AI (`score < 0.30`) suppresses even a rule match.
 
 ---
 
@@ -248,3 +252,63 @@ via `_cicids_rows(csv, label_substr, n)`.
 ---
 
 *Models referenced: `data/models/registry.json` (latest deployed: `v_1785493335`, 38 features).*
+
+---
+
+## 13. Honest Alert Decisions: Signature-Confidence Fusion
+
+Previously a signature match **forced** an alert at whatever the AI scored
+(`label=ATTACK`, rule severity) — the old behaviour asserted in
+`tests/verify_labels.py` (score 0.0 + match → alert). That conflated "the
+signature engine said something" with "we are confident this is an attack".
+
+The alert decision is now a four-way fusion where the **AI stays the primary
+attack/normal judge** and signature matches carry their **own** explicit
+confidence instead of silently forcing an alert.
+
+### Per-rule confidence
+
+Each rule in `signatures/rules.yaml` now declares `confidence` (0–1) — how much
+an alert-worthy flow matching this rule is *expected* to resemble that rule:
+
+| rule | confidence | rule | confidence |
+|---|---|---|---|
+| SYN_FLOOD_001 | 0.95 | BAD_PORT_* (7 rules) | 0.60–0.90 |
+| PORT_SCAN_MASS_001 | 0.95 | BRUTEFORCE_SSH_001 / FTP | 0.90 / 0.85 |
+| NULL_SCAN_001 | 0.95 | C2_BEACON_001 / 002 | 0.70 / 0.65 |
+| XMAS_SCAN_001 | 0.98 | ICMP_FLOOD_001 / DNS_EXFIL_001 | 0.75 / 0.70 |
+| FIN_SCAN_001 | 0.90 | LOW_VOL_DOS_001 | 0.55 |
+| PORT_SCAN_SYN_001 / RAPID | 0.90 | BRUTEFORCE_SSH_LOW_001 | 0.70 |
+| HIGH_VOLUME_001 / UDP_FLOOD | 0.80 | EXFIL_LARGE_UPLOAD_001 | 0.70 |
+
+Default when omitted: `0.7`. Loader clamps to `[0, 1]`.
+
+### Per-flow signature_confidence
+
+Matched rules combine via **probabilistic OR**: `sig = 1 − ∏(1 − cᵢ)` over every
+rule that matched the flow. Two independent 0.5 rules → `0.75`. Each alert carries
+`signature_confidence` and the `matched_rules` list.
+
+### Decision matrix
+
+| AI score | signature_confidence | verdict | driver |
+|---|---|---|---|
+| < 0.30 | any | **no alert** (confident benign; rule suppressed) | — |
+| ≥ 0.65 | any | alert | `ai`, or `both` if sig ≥ 0.50 |
+| 0.30 – 0.65 | ≥ 0.50 | alert | `signature` |
+| 0.30 – 0.65 | < 0.50 | no alert | — |
+
+Severity: highest matched rule severity when a rule matched, else
+`classify_severity(ai)`; default `low`.
+
+### Semantics & test coverage
+
+- `ai_engine/alert_engine.py`: `AI_SUPPRESS=0.30`, `AI_ALERT_MIN=0.65`,
+  `SIG_ALERT_MIN=0.50`; `signature_confidence()`, `should_alert()`, `_driver()`.
+- `signatures/checker.py::check_with_metadata` returns `confidence` per match.
+- `tests/test_signatures_alerts.py` adds matrix cases (suppression, uncertain-band
+  signature drive, `ai`/`signature`/`both` drivers, probabilistic-OR).
+- `tests/verify_labels.py` rewritten: score 0.0 + rule match → **0 alerts**;
+  score 0.50 + 0.95 rule → alert with `driver=signature`.
+
+---

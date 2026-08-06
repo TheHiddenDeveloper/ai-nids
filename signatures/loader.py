@@ -51,6 +51,15 @@ OPS: Dict[str, Callable[[Any, Any], bool]] = {
 }
 
 
+def _clamp_conf(value) -> float:
+    """Coerce a rule confidence to a float in [0, 1]; fallback 0.7 on bad value."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return 0.7
+    return min(max(v, 0.0), 1.0)
+
+
 @dataclass
 class Condition:
     field: str
@@ -80,6 +89,7 @@ class Rule:
     enabled: bool
     tags: List[str]
     conditions: List[Condition] = field(default_factory=list)
+    confidence: float = 0.7
 
     def matches(self, flow: dict) -> bool:
         """Returns True if ALL conditions match (logical AND)."""
@@ -95,6 +105,7 @@ class Rule:
             "severity":    self.severity,
             "enabled":     self.enabled,
             "tags":        self.tags,
+            "confidence":  self.confidence,
             "conditions":  len(self.conditions),
         }
 
@@ -136,6 +147,7 @@ def load_rules(rules_path: str = "signatures/rules.yaml") -> List[Rule]:
                 severity    = raw.get("severity", "medium"),
                 enabled     = raw.get("enabled", True),
                 tags        = raw.get("tags", []),
+                confidence  = _clamp_conf(raw.get("confidence", 0.7)),
                 conditions  = conditions,
             )
             compiled.append(rule)

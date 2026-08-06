@@ -330,18 +330,22 @@ export function AlertsTab({ alerts }: { alerts: Alert[] }) {
                     </td>
                     <td className="px-6 py-4">
                       {(() => {
+                        const drv = alert.driver;
                         let sigName: string | null = null;
-                        if (alert.signature_match) {
+                        if (alert.matched_rules?.length) {
+                          sigName = alert.matched_rules[0].name;
+                        } else if (alert.signature_match) {
                           try {
                             const parsed = typeof alert.signature_match === 'string' ? JSON.parse(alert.signature_match) : alert.signature_match;
                             sigName = Array.isArray(parsed) ? parsed[0]?.name : parsed?.name;
                           } catch { /* ignore */ }
                         }
-                        if (sigName) {
+                        if (drv === 'signature' || drv === 'both') {
                           return (
                             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider bg-purple-500/10 text-purple-400 border border-purple-500/20">
                               <ShieldCheck className="w-3 h-3" />
-                              {sigName}
+                              {drv === 'both' ? 'AI + Signature' : 'Signature'}
+                              {sigName ? ` · ${sigName}` : ''}
                             </span>
                           );
                         }
@@ -473,19 +477,28 @@ export function AlertsTab({ alerts }: { alerts: Alert[] }) {
               <div className="flex justify-between items-center">
                 <div>
                   <span className="text-[9px] text-slate-500 uppercase tracking-wider block">Severity Status</span>
-                  <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold mt-1 ${
-                    selectedAlertForDrawer.severity === 'high' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
-                    selectedAlertForDrawer.severity === 'medium' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
-                    'bg-slate-500/10 text-slate-400 border border-slate-500/20'
-                  }`}>
-                    {selectedAlertForDrawer.severity.toUpperCase()}
-                  </span>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                      selectedAlertForDrawer.severity === 'high' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
+                      selectedAlertForDrawer.severity === 'medium' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' :
+                      'bg-slate-500/10 text-slate-400 border border-slate-500/20'
+                    }`}>
+                      {selectedAlertForDrawer.severity.toUpperCase()}
+                    </span>
+                    {selectedAlertForDrawer.driver && (
+                      <span className={`inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider ${
+                        selectedAlertForDrawer.driver === 'signature' ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' :
+                        selectedAlertForDrawer.driver === 'both' ? 'bg-violet-500/10 text-violet-400 border border-violet-500/20' :
+                        'bg-sky-500/10 text-sky-400 border border-sky-500/20'
+                      }`}>
+                        {selectedAlertForDrawer.driver === 'both' ? 'AI + Signature' : selectedAlertForDrawer.driver === 'signature' ? 'Signature' : 'AI'}
+                      </span>
+                    )}
+                  </div>
                 </div>
                 
                 <div className="text-right">
-                  <span className="text-[9px] text-slate-500 uppercase tracking-wider block">
-                    {selectedAlertForDrawer.signature_match ? 'ML Score (Sig-Confirmed)' : 'ML Confidence'}
-                  </span>
+                  <span className="text-[9px] text-slate-500 uppercase tracking-wider block">AI Confidence</span>
                   <span className="text-lg font-mono font-bold text-white">
                     {(selectedAlertForDrawer.score * 100).toFixed(1)}%
                   </span>
@@ -503,6 +516,23 @@ export function AlertsTab({ alerts }: { alerts: Alert[] }) {
                   style={{ width: `${selectedAlertForDrawer.score * 100}%` }}
                 />
               </div>
+
+              {typeof selectedAlertForDrawer.signature_confidence === 'number' && selectedAlertForDrawer.signature_confidence > 0 && (
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-[9px] text-slate-500 uppercase tracking-wider">Signature Confidence</span>
+                    <span className="font-mono font-bold text-purple-400">
+                      {(selectedAlertForDrawer.signature_confidence * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-slate-900 rounded-full h-2 overflow-hidden border border-white/5">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${selectedAlertForDrawer.signature_confidence >= 0.8 ? 'bg-purple-500' : 'bg-fuchsia-500'}`}
+                      style={{ width: `${selectedAlertForDrawer.signature_confidence * 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4 text-xs pt-2 border-t border-white/5">
                 <div>
@@ -637,11 +667,41 @@ export function AlertsTab({ alerts }: { alerts: Alert[] }) {
                   <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-xl text-amber-400">
                     <p className="text-xs font-semibold flex items-center gap-1.5 mb-1">
                       <ShieldCheck className="w-4 h-4" aria-hidden="true" />
-                      Signature Match Rule
+                      Signature Rule Match
                     </p>
                     <p className="text-[11px] leading-relaxed text-amber-400/80">
-                      This network connection triggered a matching signature definition ruleset. The anomaly status was labeled dynamically.
+                      This alert was driven by a signature rule match with an explicit
+                      confidence of {(selectedAlertForDrawer.signature_confidence ?? 0) * 100}%.
+                      No ML feature attribution was recorded.
                     </p>
+                  </div>
+                </div>
+              )}
+
+              {selectedAlertForDrawer.matched_rules && selectedAlertForDrawer.matched_rules.length > 0 && (
+                <div className="space-y-3 pt-3 border-t border-white/5">
+                  <span className="text-[9px] text-slate-500 uppercase tracking-wider block">Matched Signature Rules</span>
+                  <div className="space-y-2">
+                    {selectedAlertForDrawer.matched_rules.map((rule, rIdx) => (
+                      <div key={rIdx} className="bg-slate-900/60 p-2.5 rounded-xl border border-white/5 space-y-1.5">
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-slate-300 font-medium flex items-center gap-1.5">
+                            <ShieldCheck className="w-3.5 h-3.5 text-purple-400" aria-hidden="true" />
+                            <span className="font-mono text-purple-300">{rule.rule_id}</span>
+                          </span>
+                          <span className="font-mono font-bold text-purple-400">
+                            {(rule.confidence ?? 0.7) * 100}%
+                          </span>
+                        </div>
+                        <div className="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden border border-white/5">
+                          <div
+                            className="h-full rounded-full bg-purple-500"
+                            style={{ width: `${(rule.confidence ?? 0.7) * 100}%` }}
+                          />
+                        </div>
+                        <span className="block text-[10px] text-slate-500">{rule.name}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}

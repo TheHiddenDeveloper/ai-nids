@@ -97,6 +97,7 @@ class SignatureChecker:
                         "severity":    rule.severity,
                         "tags":        rule.tags,
                         "description": rule.description.strip(),
+                        "confidence":  rule.confidence,
                     })
             except Exception:
                 pass

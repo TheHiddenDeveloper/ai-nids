@@ -21,6 +21,9 @@ export interface Alert {
   model_label?: string;
   confidence?: number;
   signature_match?: string;
+  signature_confidence?: number;
+  driver?: "ai" | "signature" | "both";
+  matched_rules?: SignatureMatch[];
   direction?: string;
   suppression_note?: string;
   is_malicious?: boolean;
@@ -38,6 +41,7 @@ export interface SignatureMatch {
   severity: string;
   tags: string[];
   description: string;
+  confidence?: number;
 }
 
 export interface Flow {
