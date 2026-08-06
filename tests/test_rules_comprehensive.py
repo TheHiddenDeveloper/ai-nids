@@ -482,8 +482,8 @@ class TestAlertEngineIntegration:
 
     def test_signature_overrides_ml_score(self):
         """
-        A flow below the ML threshold but matching a signature rule
-        should still produce an alert with the rule's severity.
+        A flow in the uncertain band (0.30 <= AI < 0.65) matching a signature
+        rule alerts with the rule's severity and driver=signature.
         """
         results = [{"score": 0.30, "label": "BENIGN", "syn_flag_count": 200, "ack_flag_count": 0, "direction": "inbound"}]
         alerts = process_results(results, signature_checker=self.checker)
@@ -491,14 +491,16 @@ class TestAlertEngineIntegration:
         assert alerts[0]["severity"] == "high"
         assert "signature_match" in alerts[0]
         assert alerts[0]["label"] == "ATTACK"
+        assert alerts[0]["driver"] == "signature"
 
     def test_multiple_signatures_in_alert(self):
         """
         A flow matching multiple rules should have all matches
-        serialized into signature_match.
+        serialized into signature_match (driven by signature in the
+        uncertain band; an AI < 0.30 would be suppressed entirely).
         """
         flow = {"_dst_port": 23, "direction": "inbound", "rst_flag_count": 50}
-        results = [{"score": 0.10, "label": "BENIGN", **flow}]
+        results = [{"score": 0.45, "label": "BENIGN", **flow}]
         alerts = process_results(results, signature_checker=self.checker)
         assert len(alerts) == 1
         import json

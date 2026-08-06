@@ -90,10 +90,10 @@ class TestFeatureExtractor:
         df = self.extractor.transform([flow])
         assert df["avg_packet_len"].iloc[0] == 0.0
 
-    def test_clips_extreme_rates(self):
+    def test_allows_extreme_rates_no_clipping(self):
         flow = make_flow(flow_bytes_per_sec=1e12)
         df = self.extractor.transform([flow])
-        assert df["flow_bytes_per_sec"].iloc[0] == 1e9
+        assert df["flow_bytes_per_sec"].iloc[0] == 1e12
 
     def test_is_malformed_false_for_clean_flow(self):
         df = self.extractor.transform([make_flow()])

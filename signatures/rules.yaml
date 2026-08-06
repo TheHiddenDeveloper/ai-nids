@@ -8,6 +8,7 @@ rules:
 
     '
   severity: high
+  confidence: 0.95
   enabled: true
   tags:
   - dos
@@ -29,6 +30,7 @@ rules:
 
     '
   severity: high
+  confidence: 0.8
   enabled: true
   tags:
   - dos
@@ -44,6 +46,7 @@ rules:
 
     '
   severity: high
+  confidence: 0.8
   enabled: true
   tags:
   - dos
@@ -62,6 +65,7 @@ rules:
 
     '
   severity: high
+  confidence: 0.95
   enabled: true
   tags:
   - scan
@@ -79,6 +83,7 @@ rules:
 
     '
   severity: medium
+  confidence: 0.9
   enabled: true
   tags:
   - scan
@@ -102,6 +107,7 @@ rules:
 
     '
   severity: medium
+  confidence: 0.95
   enabled: true
   tags:
   - scan
@@ -134,6 +140,7 @@ rules:
 
     '
   severity: high
+  confidence: 0.7
   enabled: true
   tags:
   - c2
@@ -162,6 +169,7 @@ rules:
 
     '
   severity: medium
+  confidence: 0.65
   enabled: true
   tags:
   - c2
@@ -182,6 +190,7 @@ rules:
 
     '
   severity: medium
+  confidence: 0.7
   enabled: true
   tags:
   - suspicious
@@ -199,6 +208,7 @@ rules:
 
     '
   severity: high
+  confidence: 0.85
   enabled: true
   tags:
   - suspicious
@@ -216,6 +226,7 @@ rules:
 
     '
   severity: medium
+  confidence: 0.7
   enabled: true
   tags:
   - suspicious
@@ -231,6 +242,7 @@ rules:
   name: VNC traffic (port 5900)
   description: Remote desktop via VNC — often misconfigured with weak credentials.
   severity: low
+  confidence: 0.6
   enabled: true
   tags:
   - suspicious
@@ -245,6 +257,7 @@ rules:
 
     '
   severity: high
+  confidence: 0.75
   enabled: true
   tags:
   - c2
@@ -257,6 +270,7 @@ rules:
   name: Metasploit listener (port 4444)
   description: Default Metasploit meterpreter reverse-shell listener port.
   severity: high
+  confidence: 0.9
   enabled: true
   tags:
   - c2
@@ -269,6 +283,7 @@ rules:
   name: Back Orifice / NetBus
   description: Known backdoor ports (31337, 12345) used by legacy RATs.
   severity: high
+  confidence: 0.9
   enabled: true
   tags:
   - c2
@@ -287,6 +302,7 @@ rules:
 
     '
   severity: high
+  confidence: 0.9
   enabled: true
   tags:
   - bruteforce
@@ -307,6 +323,7 @@ rules:
   name: FTP brute-force
   description: Repeated connection attempts against FTP (port 21).
   severity: medium
+  confidence: 0.85
   enabled: true
   tags:
   - bruteforce
@@ -324,6 +341,7 @@ rules:
 
     '
   severity: medium
+  confidence: 0.7
   enabled: true
   tags:
   - exfil
@@ -341,6 +359,7 @@ rules:
   name: ICMP flood
   description: High-rate small-packet traffic — possible ping flood.
   severity: medium
+  confidence: 0.75
   enabled: false
   tags:
   - dos
@@ -359,6 +378,7 @@ rules:
 
     '
   severity: medium
+  confidence: 0.7
   enabled: false
   tags:
   - exfil
@@ -378,6 +398,7 @@ rules:
 
     '
   severity: medium
+  confidence: 0.9
   enabled: true
   tags:
   - scan
@@ -407,6 +428,7 @@ rules:
 
     '
   severity: medium
+  confidence: 0.98
   enabled: true
   tags:
   - scan
@@ -430,6 +452,7 @@ rules:
 
     '
   severity: low
+  confidence: 0.55
   enabled: true
   tags:
   - dos
@@ -451,6 +474,7 @@ rules:
 
     '
   severity: medium
+  confidence: 0.9
   enabled: true
   tags:
   - scan
@@ -478,6 +502,7 @@ rules:
 
     '
   severity: medium
+  confidence: 0.7
   enabled: true
   tags:
   - bruteforce

@@ -284,6 +284,7 @@ def main():
                         help="Research dataset(s) to train on. 'both' = cicids2017 + ciciot2023")
     parser.add_argument("--ae-threshold-percentile", type=float, default=95.0, help="EV3: percentile for AE anomaly threshold")
     parser.add_argument("--use-bootstrap", action="store_true", help="Include synthetic seed data from bootstrap_data.py")
+    parser.add_argument("--use-probes", action="store_true", help="Include synthetic probe/scan flows from generate_probe_data.py")
     parser.add_argument("--use-pca", action="store_true", help="Apply PCA before AE training (FV1)")
     parser.add_argument("--pca-components", type=int, default=12, help="Number of PCA components (FV1)")
     args = parser.parse_args()
@@ -319,11 +320,23 @@ def main():
         else:
             logger.warning(f"Bootstrap file not found at {boot_path}. Run scripts/bootstrap_data.py first.")
 
+    # 1c. Optionally load synthetic probe/scan flows (C)
+    df_probes = pd.DataFrame()
+    if args.use_probes:
+        probe_path = Path("data/probe_data.csv")
+        if probe_path.exists():
+            df_probes = pd.read_csv(probe_path)
+            logger.info(f"Loaded {len(df_probes):,} synthetic probe flows from {probe_path}")
+        else:
+            logger.warning(f"Probe data not found at {probe_path}. Run scripts/generate_probe_data.py first.")
+
     # 2. Load Live Data
     df_live = fetch_live_data()
     sources = [df_research]
     if not df_bootstrap.empty:
         sources.append(df_bootstrap)
+    if not df_probes.empty:
+        sources.append(df_probes)
     if not df_live.empty:
         logger.info(f"Loaded {len(df_live):,} live samples from DB.")
         sources.append(df_live)
@@ -393,10 +406,17 @@ def main():
     
     # Load and score via AE if successfully trained
     ae_scaler = joblib.load(model_dir / "ae_scaler.joblib")
+    cal = joblib.load(model_dir / "ae_calibration.joblib")
+    ae_mse_mean = float(cal.get("mse_log_mean", cal.get("mse_mean", 0.0)))
+    ae_mse_std = float(cal.get("mse_log_std", cal.get("mse_std", 1.0)))
     X_test_ae_s = ae_scaler.transform(X_test)
     ae_reconstructions = ae.predict(X_test_ae_s, verbose=0)
     ae_mse = np.mean(np.power(X_test_ae_s - ae_reconstructions, 2), axis=1)
-    ae_scores = np.clip(ae_mse / (ae_threshold * 2.0), 0.0, 1.0)
+    if ae_mse_std <= 0:
+        ae_z = np.zeros_like(ae_mse)
+    else:
+        ae_z = (np.log1p(np.maximum(ae_mse, 0.0)) - ae_mse_mean) / ae_mse_std
+    ae_scores = 1.0 / (1.0 + np.exp(-ae_z))
     
     # Combined Ensemble Score (weighted from config)
     ensemble_scores = rf_w * rf_scores + ae_w * ae_scores
